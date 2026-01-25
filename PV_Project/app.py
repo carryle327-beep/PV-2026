@@ -44,7 +44,8 @@ else:
     st.stop()
 
 # 4.2 毛利率筛选
-min_margin = st.sidebar.slider("最低毛利率要求 (%):", 0, 60, 10)
+# 把最后的 10 改成 0，这样就不会误杀低毛利公司了
+min_margin = st.sidebar.slider("最低毛利率要求 (%):", 0, 60, 0)
 
 # 4.3 执行筛选
 filtered_df = df[
@@ -103,6 +104,7 @@ with tab3:
     # 下载按钮
     csv = filtered_df.to_csv(index=False).encode('utf-8-sig')
     st.download_button("📥 下载筛选数据", csv, "report.csv", "text/csv")
+
 
 
 
