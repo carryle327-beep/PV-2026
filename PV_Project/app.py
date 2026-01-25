@@ -38,7 +38,7 @@ if "信贷评级" in df.columns:
     selected_rating = st.sidebar.multiselect(
         "选择信贷评级:",
         options=all_ratings,
-        default=all_ratings）  # 简单粗暴，默认全选
+        default=all_ratings)  # 简单粗暴，默认全选
 else:
     st.error("Excel中缺少'信贷评级'列")
     st.stop()
@@ -103,5 +103,6 @@ with tab3:
     # 下载按钮
     csv = filtered_df.to_csv(index=False).encode('utf-8-sig')
     st.download_button("📥 下载筛选数据", csv, "report.csv", "text/csv")
+
 
 
