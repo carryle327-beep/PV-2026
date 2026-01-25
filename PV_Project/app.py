@@ -83,8 +83,7 @@ filtered_df = df[
 # --- 6. 核心指标卡 ---
 st.title("☀️ 2026 光伏行业信贷生存压力测试")
 
-# 🔴 显眼包：直接把数字打在公屏上
-st.info(f"📊 数据核对：Excel 原始读取 **{len(df)}** 行 | 筛选后显示 **{len(filtered_df)}** 行")
+
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("监测企业总数", f"{len(filtered_df)} 家")
@@ -113,5 +112,6 @@ with tab2:
     # 直接显示表格，这是最直观的证据
     st.dataframe(filtered_df, use_container_width=True)
     st.download_button("📥 下载数据", filtered_df.to_csv().encode('utf-8-sig'), "data.csv")
+
 
 
