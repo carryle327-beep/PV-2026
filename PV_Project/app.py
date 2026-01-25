@@ -69,7 +69,10 @@ else:
     st.stop()
 
 # 5.2 毛利率筛选 (默认 0)
-min_margin = st.sidebar.slider("最低毛利率:", 0, 60, 0)
+# 修改前：min_margin = st.sidebar.slider("最低毛利率:", 0, 60, 0)
+
+# 👇 修改后：允许负数（最低 -50%），默认从 -50 开始，保证亏损企业也能显示
+min_margin = st.sidebar.slider("最低毛利率要求 (%):", -50, 60, -50)
 
 # 5.3 执行筛选
 filtered_df = df[
@@ -110,3 +113,4 @@ with tab2:
     # 直接显示表格，这是最直观的证据
     st.dataframe(filtered_df, use_container_width=True)
     st.download_button("📥 下载数据", filtered_df.to_csv().encode('utf-8-sig'), "data.csv")
+
