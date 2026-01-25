@@ -1,13 +1,11 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import os
 import glob
 
-# --- 1. 页面配置 ---
-st.set_page_config(page_title="2026光伏信贷风控驾驶舱", layout="wide")
+st.set_page_config(page_title="数据侦探", layout="wide")
 
-# --- 2. 自动找文件 ---
+# 1. 自动找文件
 current_folder = os.path.dirname(os.path.abspath(__file__))
 xlsx_files = glob.glob(os.path.join(current_folder, "*.xlsx"))
 
@@ -16,53 +14,41 @@ if not xlsx_files:
     st.stop()
 file_path = xlsx_files[0]
 
-# --- 3. 强力加载与清洗 (Fixed) ---
-@st.cache_data
-def load_data_force():
-    # 强制读取所有行，不忽略任何错误
-    df = pd.read_excel(file_path)
-    
-    # 1. 强制保留所有行，哪怕全是空的
-    original_count = len(df)
-    
-    # 2. 清洗列名 (去掉空格)
-    df.columns = [str(c).strip() for c in df.columns]
-    
-    # 3. 处理毛利率 (最容易出错的地方)
-    if "技术壁垒(毛利率%)" in df.columns:
-        # 强制转换为数字，把无法转换的（比如"--"）变成 NaN
-        df["技术壁垒(毛利率%)"] = pd.to_numeric(df["技术壁垒(毛利率%)"], errors='coerce')
-        # 把 NaN 填补为 0 (这样就不会被过滤掉了！)
-        df["技术壁垒(毛利率%)"] = df["技术壁垒(毛利率%)"].fillna(0)
-    
-    # 4. 处理评级
-    if "信贷评级" in df.columns:
-        df["信贷评级"] = df["信贷评级"].fillna("未分级").astype(str)
-        
-    return df, original_count
+st.title("🕵️‍♂️ 数据行数大侦探")
+st.write(f"正在读取文件：`{os.path.basename(file_path)}`")
 
-# 加载数据
-df, raw_count = load_data_force()
-
-# --- 4. 显眼包调试条 ---
-st.success(f"📊 Excel 原始行数：{raw_count} 行 | 当前显示：{len(df)} 行")
-if raw_count != 52:
-    st.warning(f"⚠️ 注意：你的 Excel 里只有 {raw_count} 行数据，不是 52 行！请检查 Excel 文件内容。")
-
-# --- 5. 侧边栏 ---
-st.sidebar.header("🔍 筛选")
-if "信贷评级" in df.columns:
-    all_ratings = sorted(list(df["信贷评级"].unique()))
-    selected = st.sidebar.multiselect("评级", all_ratings, default=all_ratings) # 默认全选
+# 2. 核心修复：读取 Excel 的“目录”
+try:
+    # 先打开 Excel "书"，看看有几章 (Sheet)
+    excel_file = pd.ExcelFile(file_path)
+    sheet_names = excel_file.sheet_names
     
-    # 筛选逻辑
-    mask_rating = df["信贷评级"].isin(selected)
-    filtered_df = df[mask_rating]
+    # 让用户选择读取哪一个 Sheet
+    selected_sheet = st.selectbox("请选择包含完整数据的 Sheet (工作表):", sheet_names)
+    
+    # 读取选中的 Sheet
+    # ⚠️ 注意：这里没加 cache，保证每次都读最新的
+    df = pd.read_excel(file_path, sheet_name=selected_sheet)
+
+except Exception as e:
+    st.error(f"读取失败: {e}")
+    st.stop()
+
+# 3. 结果展示
+real_count = len(df)
+st.metric("📊 Python 实际读到的行数", f"{real_count} 行", delta=f"目标 52 行")
+
+if real_count == 52:
+    st.success("✅ 终于对上了！就是这个 Sheet！")
+elif real_count == 41:
+    st.warning("⚠️ 还是 41 行？请检查一下你选的 Sheet 对不对，或者 Excel 里这页是不是真的只有 41 行？")
 else:
-    filtered_df = df
+    st.info(f"读到了 {real_count} 行。")
 
-# --- 6. 展示数据表 (直接看这里有没有 52) ---
-st.title("☀️ 光伏企业全量数据")
-st.metric("当前显示数量", f"{len(filtered_df)} 家")
+# 4. 看看最后几行是什么 (防止最后几行被当成空值扔了)
+st.write("📋 数据的最后 5 行如下 (请检查是否包含最后那几家公司):")
+st.dataframe(df.tail(5))
 
-st.dataframe(filtered_df, use_container_width=True)
+# 5. 简单展示全部数据
+st.write("📋 全部数据:")
+st.dataframe(df)
