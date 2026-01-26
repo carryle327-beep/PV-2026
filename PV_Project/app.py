@@ -9,54 +9,48 @@ import time
 import akshare as ak
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="SCB Risk Pilot V11.0", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SCB Risk Pilot V12.0", layout="wide", initial_sidebar_state="expanded")
 
-# --- 2. 强制白底黑字 CSS (增强权重) ---
+# --- 2. 核弹级 CSS：暴力强制白底黑字 ---
 st.markdown("""
     <style>
-    /* 强制应用背景为纯白，忽略系统深色模式 */
-    [data-testid="stAppViewContainer"] {
+    /* 1. 强制应用容器背景为纯白 */
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
         background-color: #FFFFFF !important;
     }
-    [data-testid="stHeader"] {
-        background-color: #FFFFFF !important;
-    }
+    
+    /* 2. 强制侧边栏背景为淡灰 */
     [data-testid="stSidebar"] {
         background-color: #F8F9FA !important;
         border-right: 1px solid #E0E0E0;
     }
     
-    /* 暴力强制所有文本元素为纯黑 */
-    html, body, p, h1, h2, h3, h4, h5, h6, span, div, label, text, li, a {
+    /* 3. 暴力强制所有文本颜色为纯黑 (权重最高) */
+    * {
         color: #000000 !important;
+        -webkit-text-fill-color: #000000 !important;
         font-family: 'Arial', sans-serif !important;
-        -webkit-text-fill-color: #000000 !important; /* 兼容性增强 */
     }
     
-    /* 修复 Metric 指标卡颜色 */
-    div[data-testid="stMetricValue"] {
-        color: #000000 !important;
-    }
-    div[data-testid="stMetricLabel"] {
-        color: #333333 !important;
-    }
-    
-    /* 控件修复 */
-    div[data-baseweb="slider"] div[class*="css-"] { background-color: #2E3B4E !important; }
-    div[role="slider"] { background-color: #2E3B4E !important; border-color: #2E3B4E !important; }
-    .stButton>button {
-        background-color: #2E3B4E !important; 
-        color: #FFFFFF !important; /* 按钮文字保持白 */
+    /* 4. 特殊修复：按钮文字颜色 (保持白色) */
+    .stButton>button, .stButton>button * {
+        color: #FFFFFF !important;
         -webkit-text-fill-color: #FFFFFF !important;
-        border-radius: 2px;
-        border: none;
-    }
-    
-    /* Tab 选中态 */
-    .stTabs [aria-selected="true"] {
         background-color: #2E3B4E !important;
-        color: white !important;
+        border: none;
+        border-radius: 2px;
+    }
+    
+    /* 5. 特殊修复：Tab 选中态 (保持白色) */
+    .stTabs [aria-selected="true"], .stTabs [aria-selected="true"] * {
+        background-color: #2E3B4E !important;
+        color: #FFFFFF !important;
         -webkit-text-fill-color: #FFFFFF !important;
+    }
+    
+    /* 6. 修复 Plotly 图表背景融合 */
+    .js-plotly-plot .plotly .main-svg {
+        background: white !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -113,7 +107,7 @@ def process_data_smartly(df, use_real_fetch=False):
     return df
 
 # --- 4. 评分引擎 ---
-def calculate_score_v11(row, params):
+def calculate_score_v12(row, params):
     score = 0
     base_margin = row.get('最新毛利率', 20)
     
@@ -146,10 +140,10 @@ def calculate_score_v11(row, params):
     else: rating = "D"
     
     return pd.Series([final_score, rating, stress_margin, inv], 
-                     index=['V11_Score', 'V11_Rating', 'Stress_Margin', 'Inv_Days'])
+                     index=['V12_Score', 'V12_Rating', 'Stress_Margin', 'Inv_Days'])
 
 # --- 5. 界面逻辑 ---
-st.sidebar.markdown("## SCB RISK PILOT V11.0")
+st.sidebar.markdown("## SCB RISK PILOT V12.0")
 st.sidebar.markdown("---")
 app_mode = st.sidebar.radio("MODULE", ["📈 MACRO HISTORY", "⚡ REAL-DATA STRESS TEST"])
 
@@ -159,7 +153,7 @@ if not xlsx_files: st.stop()
 file_path = xlsx_files[0]
 
 # =========================================================
-# 模块一：历史周期
+# 模块一：历史周期 (带大事件文字)
 # =========================================================
 if app_mode == "📈 MACRO HISTORY":
     st.markdown("### PV INDUSTRY CYCLE HISTORY (2000-2026)")
@@ -189,7 +183,7 @@ if app_mode == "📈 MACRO HISTORY":
         mode='lines+markers+text', 
         text=df_hist['label'],     
         textposition="top center", 
-        textfont=dict(size=14, color='#000000', family="Arial Black"), 
+        textfont=dict(size=14, color='black', family="Arial Black"), 
         name='Cycle',
         line=dict(color='#2E3B4E', width=3),
         marker=dict(size=10, color='#D32F2F', line=dict(width=2, color='white')),
@@ -201,12 +195,12 @@ if app_mode == "📈 MACRO HISTORY":
         plot_bgcolor='white', 
         paper_bgcolor='white',
         height=600,
-        # 强制所有坐标轴字体为黑
+        # 强制所有图表元素为黑
         font=dict(color="black", family="Arial"),
         xaxis=dict(showgrid=False, tickmode='linear', dtick=1, tickangle=-90, color='black'),
         yaxis=dict(showgrid=True, gridcolor='#F0F0F0', color='black', title_font=dict(color='black'))
     )
-    # 关键：禁用 Streamlit 主题，使用我们定义的黑色字体
+    # 关键：theme=None 禁用 Streamlit 自动调色
     st.plotly_chart(fig, use_container_width=True, theme=None)
 
 # =========================================================
@@ -231,10 +225,10 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
     if fetch_triggered:
         with st.spinner("Processing Data..."):
             df_work = process_data_smartly(df_raw, use_real_fetch=True)
-            st.session_state['df_v11'] = df_work
+            st.session_state['df_v12'] = df_work
             st.success("Data Updated!")
-    elif 'df_v11' in st.session_state:
-        df_work = st.session_state['df_v11']
+    elif 'df_v12' in st.session_state:
+        df_work = st.session_state['df_v12']
     else:
         df_work = process_data_smartly(df_raw, use_real_fetch=False)
 
@@ -246,8 +240,8 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
     inv_limit = st.sidebar.slider("Inv Days Limit", 60, 200, 120)
     
     params = {'margin_shock': margin_shock, 'tariff_shock': tariff_shock, 'inv_limit': inv_limit}
-    v11_res = df_work.apply(lambda row: calculate_score_v11(row, params), axis=1)
-    df_final = pd.concat([df_work, v11_res], axis=1)
+    v12_res = df_work.apply(lambda row: calculate_score_v12(row, params), axis=1)
+    df_final = pd.concat([df_work, v12_res], axis=1)
     
     st.markdown("### RISK COCKPIT")
     
@@ -265,9 +259,9 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
         if not df_final.empty:
             fig_tree = px.treemap(
                 df_final,
-                path=[px.Constant("PV Sector"), 'V11_Rating', '公司名称'],
-                values='V11_Score',
-                color='V11_Score',
+                path=[px.Constant("PV Sector"), 'V12_Rating', '公司名称'],
+                values='V12_Score',
+                color='V12_Score',
                 color_continuous_scale='RdYlGn', 
                 range_color=[0, 100], 
                 height=600
@@ -277,7 +271,6 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
                 textfont=dict(size=14, color="black"), # 强制黑色
                 marker=dict(line=dict(width=2, color='white'))
             )
-            # 强制布局字体颜色
             fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0), font=dict(color="black", family="Arial"))
             st.plotly_chart(fig_tree, use_container_width=True, theme=None)
             
@@ -285,7 +278,7 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
     with t2:
         if not df_final.empty:
             fig_bubble = px.scatter(
-                df_final, x="Stress_Margin", y="V11_Score", size="V11_Score", color="V11_Rating",
+                df_final, x="Stress_Margin", y="V12_Score", size="V12_Score", color="V12_Rating",
                 hover_name="公司名称", color_discrete_sequence=["#2E3B4E", "#5D6D7E", "#90A4AE", "#CFD8DC"], height=550
             )
             fig_bubble.update_layout(
@@ -300,7 +293,7 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
     with t3:
         if not df_final.empty:
             fig_dist = px.strip(
-                df_final.sort_values("V11_Rating"), x="V11_Rating", y="V11_Score", color="V11_Rating",
+                df_final.sort_values("V12_Rating"), x="V12_Rating", y="V12_Score", color="V12_Rating",
                 color_discrete_sequence=["#2E3B4E", "#5D6D7E", "#90A4AE", "#CFD8DC"], height=500
             )
             fig_dist.update_layout(
@@ -315,7 +308,7 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
     with t4:
         st.markdown("**Chart 4: Correlation Matrix** (Red=Positive, Blue=Negative)")
         if not df_final.empty:
-            corr_cols = ['V11_Score', 'Stress_Margin', 'Inv_Days', '海外营收占比(%)', '资产负债率(%)']
+            corr_cols = ['V12_Score', 'Stress_Margin', 'Inv_Days', '海外营收占比(%)', '资产负债率(%)']
             for c in corr_cols:
                 if c not in df_final.columns: df_final[c] = 0
                 df_final[c] = pd.to_numeric(df_final[c], errors='coerce').fillna(0)
@@ -330,8 +323,7 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
                 zmin=-1, zmax=1,
                 text=np.round(corr_matrix.values, 2),
                 texttemplate="%{text}", 
-                # 关键：这里强制指定了 textfont 为黑色，且家族为 Arial
-                textfont={"size": 14, "color": "black", "family": "Arial"},
+                textfont={"size": 14, "color": "black", "family": "Arial"}, # 关键
                 xgap=2, ygap=2
             ))
             
@@ -339,16 +331,14 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
                 height=600,
                 plot_bgcolor='white', 
                 paper_bgcolor='white',
-                # 强制全局字体为黑
                 font=dict(color="black", family="Arial"),
                 xaxis=dict(side="bottom", color="black"),
                 yaxis=dict(color="black"),
                 margin=dict(t=20, l=20, r=20, b=20)
             )
-            # 关键：theme=None 禁用 Streamlit 的自动调色（防止变白/变灰）
             st.plotly_chart(fig_corr, use_container_width=True, theme=None)
 
     with t5:
-        st.dataframe(df_final.sort_values("V11_Score", ascending=False), use_container_width=True)
+        st.dataframe(df_final.sort_values("V12_Score", ascending=False), use_container_width=True)
         csv = df_final.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("💾 DOWNLOAD CSV", csv, "SCB_Risk_V11.csv", "text/csv")
+        st.download_button("💾 DOWNLOAD CSV", csv, "SCB_Risk_V12.csv", "text/csv")
