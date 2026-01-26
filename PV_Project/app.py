@@ -9,13 +9,7 @@ import time
 import akshare as ak
 
 # --- 1. 页面配置 (开启宽屏) ---
-st.set_page_config(
-    page_title="SCB Risk Pilot V14.0", 
-    layout="wide", 
-    initial_sidebar_state="expanded"
-)
-
-# --- 2. 渣打黑金 CSS (Dark Premium) ---
+# --- 2. 渣打黑金 CSS (标题加粗修正版) ---
 st.markdown("""
     <style>
     /* 1. 全局背景：纯黑 */
@@ -23,27 +17,30 @@ st.markdown("""
         background-color: #000000 !important;
     }
     
-    /* 2. 侧边栏：深矿灰，增加层次感 */
+    /* 2. 侧边栏：深矿灰 */
     [data-testid="stSidebar"] {
         background-color: #121212 !important;
         border-right: 1px solid #333333;
     }
     
-    /* 3. 全局字体：白色，英文优先 (Helvetica) */
-    html, body, p, h1, h2, h3, h4, h5, h6, span, div, label, li, a {
+    /* 3. 正文通用字体：白色，Helvetica */
+    html, body, p, span, div, label, li, a {
         color: #E0E0E0 !important;
         font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
-        font-weight: 400;
+        font-weight: 400; /* 正文保持正常粗细 */
     }
     
-    /* 标题加粗，显眼 */
-    h1, h2, h3 {
+    /* =========== 核心修改：标题暴力加粗 =========== */
+    h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
         color: #FFFFFF !important;
-        font-weight: 600 !important;
-        letter-spacing: 0.5px;
+        font-weight: 800 !important; /* 800 = 特粗 (Extra Bold) */
+        font-family: 'Helvetica Neue', sans-serif !important;
+        letter-spacing: 0.5px !important; /* 增加一点字间距，更显高级 */
+        text-transform: uppercase; /* 建议：标题自动大写，更有投行感 (可选) */
     }
+    /* =========================================== */
     
-    /* 4. 指标卡 (Metric)：黑底 + 微发光边框 */
+    /* 4. 指标卡 (Metric) */
     div[data-testid="stMetric"] {
         background-color: #1E1E1E !important;
         border: 1px solid #333333;
@@ -52,53 +49,55 @@ st.markdown("""
         transition: all 0.3s ease;
     }
     div[data-testid="stMetric"]:hover {
-        border-color: #005EBB; /* 悬停变渣打蓝 */
+        border-color: #005EBB;
         box-shadow: 0 0 10px rgba(0, 94, 187, 0.3);
     }
     [data-testid="stMetricValue"] {
-        color: #FFFFFF !important; /* 数值纯白 */
-        font-family: 'Roboto Mono', monospace !important; /* 数字用等宽字体，更像终端 */
+        color: #FFFFFF !important;
+        font-family: 'Roboto Mono', monospace !important;
+        font-weight: 700 !important; /* 数字也要加粗 */
     }
     [data-testid="stMetricLabel"] {
-        color: #888888 !important; /* 标签深灰 */
+        color: #AAAAAA !important; /* 标签稍微亮一点的灰 */
+        font-weight: 600 !important;
     }
     
-    /* 5. 按钮：渣打蓝 (SCB Blue) */
+    /* 5. 按钮：渣打蓝 */
     .stButton>button {
         background-color: #005EBB !important;
         color: #FFFFFF !important;
         border: none;
         border-radius: 2px;
-        font-weight: 600;
+        font-weight: 700 !important; /* 按钮文字加粗 */
         text-transform: uppercase;
         letter-spacing: 1px;
     }
     .stButton>button:hover {
-        background-color: #007BFF !important; /* 悬停变亮 */
+        background-color: #007BFF !important;
         box-shadow: 0 0 8px rgba(0, 123, 255, 0.5);
     }
     
-    /* 6. 滑块与输入控件：去红，改用渣打青/蓝 */
+    /* 6. 滑块与输入控件 */
     div[data-baseweb="slider"] div[class*="css-"] { 
-        background-color: #009F4D !important; /* 渣打绿 */
+        background-color: #009F4D !important; 
     }
     div[role="slider"] { 
         background-color: #FFFFFF !important; 
         border-color: #009F4D !important; 
     }
     
-    /* 7. Tab 页签：选中态为渣打蓝 */
+    /* 7. Tab 页签 */
     .stTabs [aria-selected="true"] {
         background-color: #005EBB !important;
         color: #FFFFFF !important;
-        border-radius: 2px;
+        font-weight: 700 !important; /* 选中Tab加粗 */
     }
     .stTabs [aria-selected="false"] {
         background-color: #1E1E1E !important;
         color: #888888 !important;
     }
     
-    /* 8. 去除 Streamlit 默认的红/橙色装饰 */
+    /* 8. 去除 Streamlit 装饰 */
     .stAlert {
         background-color: #1E1E1E !important;
         border: 1px solid #333;
@@ -408,3 +407,4 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
         st.dataframe(df_final.sort_values("V14_Score", ascending=False), use_container_width=True)
         csv = df_final.to_csv(index=False).encode('utf-8-sig')
         st.download_button("💾 DOWNLOAD CSV", csv, "SCB_Risk_V14.csv", "text/csv")
+
