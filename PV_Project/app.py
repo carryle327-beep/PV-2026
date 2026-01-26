@@ -8,8 +8,15 @@ import glob
 import time
 import akshare as ak
 
-# --- 1. 页面配置 (开启宽屏) ---
-# --- 2. 渣打黑金 CSS (标题加粗修正版) ---
+# --- 1. 页面配置 (通用化命名) ---
+st.set_page_config(
+    page_title="Global Credit Lens", 
+    layout="wide", 
+    initial_sidebar_state="expanded",
+    page_icon="🌐"
+)
+
+# --- 2. 黑金企业级 CSS (无品牌特征) ---
 st.markdown("""
     <style>
     /* 1. 全局背景：纯黑 */
@@ -27,18 +34,18 @@ st.markdown("""
     html, body, p, span, div, label, li, a {
         color: #E0E0E0 !important;
         font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
-        font-weight: 600; /* 正文保持正常粗细 */
+        font-weight: 700;
     }
     
-    /* =========== 核心修改：标题暴力加粗 =========== */
+    /* =========== 标题暴力加粗 =========== */
     h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
         color: #FFFFFF !important;
-        font-weight: 900 !important; /* 900 = 特粗 (Extra Bold) */
+        font-weight: 1000 !important; /* 特粗 */
         font-family: 'Helvetica Neue', sans-serif !important;
-        letter-spacing: 0.5px !important; /* 增加一点字间距，更显高级 */
-        text-transform: uppercase; /* 建议：标题自动大写，更有投行感 (可选) */
+        letter-spacing: 0.5px !important;
+        text-transform: uppercase;
     }
-    /* =========================================== */
+    /* ================================= */
     
     /* 4. 指标卡 (Metric) */
     div[data-testid="stMetric"] {
@@ -49,26 +56,26 @@ st.markdown("""
         transition: all 0.3s ease;
     }
     div[data-testid="stMetric"]:hover {
-        border-color: #005EBB;
-        box-shadow: 0 0 10px rgba(0, 94, 187, 0.3);
+        border-color: #007BFF; /* 通用蓝 */
+        box-shadow: 0 0 10px rgba(0, 123, 255, 0.3);
     }
     [data-testid="stMetricValue"] {
         color: #FFFFFF !important;
         font-family: 'Roboto Mono', monospace !important;
-        font-weight: 800 !important; /* 数字也要加粗 */
+        font-weight: 900 !important;
     }
     [data-testid="stMetricLabel"] {
-        color: #AAAAAA !important; /* 标签稍微亮一点的灰 */
-        font-weight: 700 !important;
+        color: #AAAAAA !important;
+        font-weight: 800 !important;
     }
     
-    /* 5. 按钮：渣打蓝 */
+    /* 5. 按钮：企业蓝 */
     .stButton>button {
-        background-color: #005EBB !important;
+        background-color: #0056D2 !important; /* 通用深蓝 */
         color: #FFFFFF !important;
         border: none;
         border-radius: 2px;
-        font-weight: 800 !important; /* 按钮文字加粗 */
+        font-weight: 800 !important;
         text-transform: uppercase;
         letter-spacing: 1px;
     }
@@ -77,20 +84,20 @@ st.markdown("""
         box-shadow: 0 0 8px rgba(0, 123, 255, 0.5);
     }
     
-    /* 6. 滑块与输入控件 */
+    /* 6. 滑块：通用绿 */
     div[data-baseweb="slider"] div[class*="css-"] { 
-        background-color: #009F4D !important; 
+        background-color: #28A745 !important; 
     }
     div[role="slider"] { 
         background-color: #FFFFFF !important; 
-        border-color: #009F4D !important; 
+        border-color: #28A745 !important; 
     }
     
     /* 7. Tab 页签 */
     .stTabs [aria-selected="true"] {
-        background-color: #005EBB !important;
+        background-color: #0056D2 !important;
         color: #FFFFFF !important;
-        font-weight: 700 !important; /* 选中Tab加粗 */
+        font-weight: 800 !important;
     }
     .stTabs [aria-selected="false"] {
         background-color: #1E1E1E !important;
@@ -158,7 +165,7 @@ def process_data_smartly(df, use_real_fetch=False):
     return df
 
 # --- 4. 评分引擎 ---
-def calculate_score_v14(row, params):
+def calculate_score_v15(row, params):
     score = 0
     base_margin = row.get('最新毛利率', 20)
     
@@ -191,11 +198,11 @@ def calculate_score_v14(row, params):
     else: rating = "D"
     
     return pd.Series([final_score, rating, stress_margin, inv], 
-                     index=['V14_Score', 'V14_Rating', 'Stress_Margin', 'Inv_Days'])
+                     index=['V15_Score', 'V15_Rating', 'Stress_Margin', 'Inv_Days'])
 
 # --- 5. 界面逻辑 ---
-st.sidebar.markdown("## SCB RISK PILOT V14.0")
-st.sidebar.caption("ENTERPRISE DARK MODE")
+st.sidebar.markdown("## GLOBAL CREDIT LENS")
+st.sidebar.caption("ENTERPRISE RISK ANALYTICS")
 st.sidebar.markdown("---")
 app_mode = st.sidebar.radio("MODULE", ["📈 MACRO HISTORY", "⚡ REAL-DATA STRESS TEST"])
 
@@ -216,7 +223,7 @@ if app_mode == "📈 MACRO HISTORY":
         2020: 95,  2022: 100, 2024: 20,  2026: 85
     }
     events_map = {
-        2005: "Suntech IPO", 2008: "Silicon Peak", 2009: "Fin Crisis",
+        2005: "IPO Boom", 2008: "Silicon Peak", 2009: "Fin Crisis",
         2011: "Trade War", 2013: "Subsidy Start", 2016: "Top Runner",
         2018: "531 Policy",  2020: "Carbon Zero", 2024: "Price War", 2026: "AI Boom"
     }
@@ -238,20 +245,19 @@ if app_mode == "📈 MACRO HISTORY":
         # 字体：白色，Helvetica
         textfont=dict(size=12, color='#FFFFFF', family="Helvetica Neue"), 
         name='Cycle Index',
-        # 线条：渣打蓝 (#005EBB)
-        line=dict(color='#005EBB', width=3),
-        # 标记：去掉红色！改为青色 (#00E5FF) 或 渣打绿 (#009F4D)，带白边
-        marker=dict(size=8, color='#009F4D', line=dict(width=2, color='#FFFFFF')),
+        # 线条：通用企业蓝 (#0056D2)
+        line=dict(color='#0056D2', width=3),
+        # 标记：通用绿 (#28A745)，带白边
+        marker=dict(size=8, color='#28A745', line=dict(width=2, color='#FFFFFF')),
         fill='tozeroy',
         # 填充：深蓝渐变
-        fillcolor='rgba(0, 94, 187, 0.2)'
+        fillcolor='rgba(0, 86, 210, 0.2)'
     ))
     
-    # 使用 plotly_dark 主题适配黑底
     fig.update_layout(
-        template="plotly_dark", # 关键：黑底模式
-        plot_bgcolor='rgba(0,0,0,0)', # 透明背景
-        paper_bgcolor='rgba(0,0,0,0)', # 透明背景
+        template="plotly_dark", # 黑底
+        plot_bgcolor='rgba(0,0,0,0)', 
+        paper_bgcolor='rgba(0,0,0,0)', 
         height=600,
         xaxis=dict(showgrid=False, tickmode='linear', dtick=1, tickangle=-90, color='#AAAAAA'),
         yaxis=dict(showgrid=True, gridcolor='#333333', color='#AAAAAA', title="Sentiment Index"),
@@ -276,15 +282,15 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
     c1, c2 = st.columns([3, 1])
     with c1: st.info("Fetch real-time financial data. (Bloomberg Ticker: 600438 CH)")
     with c2: 
-        fetch_triggered = st.button("📡 FETCH REAL DATA")
+        fetch_triggered = st.button(" FETCH REAL DATA")
 
     if fetch_triggered:
         with st.spinner("Processing Data..."):
             df_work = process_data_smartly(df_raw, use_real_fetch=True)
-            st.session_state['df_v14'] = df_work
+            st.session_state['df_v15'] = df_work
             st.success("Data Updated!")
-    elif 'df_v14' in st.session_state:
-        df_work = st.session_state['df_v14']
+    elif 'df_v15' in st.session_state:
+        df_work = st.session_state['df_v15']
     else:
         df_work = process_data_smartly(df_raw, use_real_fetch=False)
 
@@ -296,8 +302,8 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
     inv_limit = st.sidebar.slider("Inv Days Limit", 60, 200, 120)
     
     params = {'margin_shock': margin_shock, 'tariff_shock': tariff_shock, 'inv_limit': inv_limit}
-    v14_res = df_work.apply(lambda row: calculate_score_v14(row, params), axis=1)
-    df_final = pd.concat([df_work, v14_res], axis=1)
+    v15_res = df_work.apply(lambda row: calculate_score_v15(row, params), axis=1)
+    df_final = pd.concat([df_work, v15_res], axis=1)
     
     st.markdown("### RISK COCKPIT")
     
@@ -309,23 +315,23 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
         "Data Grid"
     ])
     
-    # Chart 1: Heatmap (保留红绿语义，但背景适配黑底)
+    # Chart 1: Heatmap
     with t1:
         st.markdown("**Chart 1: Industry Credit Heatmap**")
         if not df_final.empty:
             fig_tree = px.treemap(
                 df_final,
-                path=[px.Constant("PV Sector"), 'V14_Rating', '公司名称'],
-                values='V14_Score',
-                color='V14_Score',
+                path=[px.Constant("PV Sector"), 'V15_Rating', '公司名称'],
+                values='V15_Score',
+                color='V15_Score',
                 color_continuous_scale='RdYlGn', 
                 range_color=[0, 100], 
                 height=600
             )
             fig_tree.update_traces(
                 textinfo="label+value",
-                textfont=dict(size=14, color="white"), # 字体改白
-                marker=dict(line=dict(width=1, color='#121212')) # 边框改黑
+                textfont=dict(size=14, color="white"), 
+                marker=dict(line=dict(width=1, color='#121212'))
             )
             fig_tree.update_layout(
                 template="plotly_dark", 
@@ -334,14 +340,14 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
             )
             st.plotly_chart(fig_tree, use_container_width=True)
             
-    # Chart 2: Bubble (黑底荧光风)
+    # Chart 2: Bubble
     with t2:
         if not df_final.empty:
             fig_bubble = px.scatter(
-                df_final, x="Stress_Margin", y="V14_Score", size="V14_Score", color="V14_Rating",
+                df_final, x="Stress_Margin", y="V15_Score", size="V15_Score", color="V15_Rating",
                 hover_name="公司名称", 
-                # SCB 荧光色系: 蓝, 绿, 青, 白, 灰
-                color_discrete_sequence=["#005EBB", "#009F4D", "#00E5FF", "#B0BEC5", "#CFD8DC"], 
+                # 通用企业色系: 蓝, 绿, 青, 白, 灰
+                color_discrete_sequence=["#0056D2", "#28A745", "#00E5FF", "#B0BEC5", "#CFD8DC"], 
                 height=550
             )
             fig_bubble.update_layout(
@@ -353,12 +359,12 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
             )
             st.plotly_chart(fig_bubble, use_container_width=True)
             
-    # Chart 3: Strip (黑底荧光风)
+    # Chart 3: Strip
     with t3:
         if not df_final.empty:
             fig_dist = px.strip(
-                df_final.sort_values("V14_Rating"), x="V14_Rating", y="V14_Score", color="V14_Rating",
-                color_discrete_sequence=["#005EBB", "#009F4D", "#00E5FF", "#B0BEC5", "#CFD8DC"], 
+                df_final.sort_values("V15_Rating"), x="V15_Rating", y="V15_Score", color="V15_Rating",
+                color_discrete_sequence=["#0056D2", "#28A745", "#00E5FF", "#B0BEC5", "#CFD8DC"], 
                 height=500
             )
             fig_dist.update_layout(
@@ -369,11 +375,11 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
             )
             st.plotly_chart(fig_dist, use_container_width=True)
             
-    # Chart 4: Correlation (黑底 + 红蓝)
+    # Chart 4: Correlation
     with t4:
         st.markdown("**Chart 4: Factor Correlation**")
         if not df_final.empty:
-            corr_cols = ['V14_Score', 'Stress_Margin', 'Inv_Days', '海外营收占比(%)', '资产负债率(%)']
+            corr_cols = ['V15_Score', 'Stress_Margin', 'Inv_Days', '海外营收占比(%)', '资产负债率(%)']
             for c in corr_cols:
                 if c not in df_final.columns: df_final[c] = 0
                 df_final[c] = pd.to_numeric(df_final[c], errors='coerce').fillna(0)
@@ -389,7 +395,7 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
                 text=np.round(corr_matrix.values, 2),
                 texttemplate="%{text}", 
                 # 白色数字，适合黑底
-                textfont={"size": 14, "color": "white", "family": "Helvetica Neue"},
+                textfont={"size": 17, "color": "white", "family": "Helvetica Neue"},
                 xgap=1, ygap=1
             ))
             
@@ -404,8 +410,6 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
             st.plotly_chart(fig_corr, use_container_width=True)
 
     with t5:
-        st.dataframe(df_final.sort_values("V14_Score", ascending=False), use_container_width=True)
+        st.dataframe(df_final.sort_values("V15_Score", ascending=False), use_container_width=True)
         csv = df_final.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("💾 DOWNLOAD CSV", csv, "SCB_Risk_V14.csv", "text/csv")
-
-
+        st.download_button("💾 DOWNLOAD CSV", csv, "Credit_Risk_Report_V15.csv", "text/csv")
