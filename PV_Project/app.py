@@ -9,9 +9,9 @@ import time
 import akshare as ak
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="SCB Risk Pilot V6.0", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SCB Risk Pilot V7.0", layout="wide", initial_sidebar_state="expanded")
 
-# --- 2. 极致机构灰 CSS (保持高级感) ---
+# --- 2. 极致机构灰 CSS (保持高级感，但允许图表用彩色) ---
 st.markdown("""
     <style>
     .stApp { background-color: #F5F7F9 !important; }
@@ -133,8 +133,8 @@ def calculate_score_v6(row, params):
                      index=['V6_Score', 'V6_Rating', 'Stress_Margin', 'Inv_Days', 'Risks'])
 
 # --- 5. 界面逻辑 ---
-st.sidebar.markdown("## SCB RISK PILOT V6.0")
-st.sidebar.caption("REAL-TIME CHART INTEGRATION")
+st.sidebar.markdown("## SCB RISK PILOT V7.0")
+st.sidebar.caption("ENHANCED VISUALIZATION")
 st.sidebar.markdown("---")
 app_mode = st.sidebar.radio("MODULE", ["📈 MACRO HISTORY", "⚡ REAL-DATA STRESS TEST"])
 
@@ -143,17 +143,58 @@ xlsx_files = glob.glob(os.path.join(current_folder, "*.xlsx"))
 if not xlsx_files: st.stop()
 file_path = xlsx_files[0]
 
+# =========================================================
+# 模块一：历史周期 (波动加剧版)
+# =========================================================
 if app_mode == "📈 MACRO HISTORY":
-    st.markdown("### PV INDUSTRY CYCLE HISTORY")
-    anchors = {2000: 15, 2013: 50, 2020: 85, 2026: 70}
+    st.markdown("### PV INDUSTRY CYCLE HISTORY (Volatility Enhanced)")
+    
+    # 调整后的锚点：拉大高低差，体现“大起大落”
+    anchors = {
+        2000: 10,  # 萌芽
+        2005: 40,  # 上市热
+        2008: 100, # 拥硅为王 (巅峰)
+        2009: 25,  # 金融危机 (暴跌)
+        2011: 15,  # 双反+尚德破产 (冰点)
+        2013: 55,  # 补贴救市 (V型反转)
+        2016: 85,  # 领跑者
+        2018: 30,  # 531新政 (断崖下跌)
+        2020: 95,  # 碳中和 (暴涨)
+        2022: 100, # 俄乌危机 (高潮)
+        2024: 20,  # 内卷之王 (当前惨状)
+        2026: 85   # AI周期 (预测反弹)
+    }
+    
     full_years = list(range(2000, 2027))
-    s_val = pd.Series(anchors).reindex(full_years).interpolate(method='linear')
+    # 使用 Spline 插值保持平滑但陡峭
+    s_val = pd.Series(anchors).reindex(full_years).interpolate(method='linear') 
+    # 为了让转折更尖锐，这里用 linear 插值，或者可以手动微调
+    
     df_hist = pd.DataFrame({'year': full_years, 'val': s_val.values})
+    
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df_hist['year'], y=df_hist['val'], mode='lines', line=dict(color='#2E3B4E', width=3)))
-    fig.update_layout(plot_bgcolor='white', height=500)
+    fig.add_trace(go.Scatter(
+        x=df_hist['year'], 
+        y=df_hist['val'], 
+        mode='lines+markers', 
+        name='Index',
+        line=dict(color='#2E3B4E', width=3), # 保持SCB蓝
+        fill='tozeroy',
+        fillcolor='rgba(46, 59, 78, 0.1)'
+    ))
+    
+    fig.update_layout(
+        plot_bgcolor='white', 
+        height=550,
+        title="Cycle Volatility Index (2000-2026)",
+        xaxis=dict(showgrid=False, tickmode='linear', dtick=1, tickangle=-90),
+        yaxis=dict(showgrid=True, gridcolor='#EEE', title="Industry Sentiment")
+    )
     st.plotly_chart(fig, use_container_width=True)
 
+# =========================================================
+# 模块二：实战风控
+# =========================================================
 elif app_mode == "⚡ REAL-DATA STRESS TEST":
     try:
         sheet_names = pd.ExcelFile(file_path).sheet_names
@@ -164,7 +205,6 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
     def load_raw(p, s): return pd.read_excel(p, sheet_name=s)
     df_raw = load_raw(file_path, selected_sheet)
     
-    # 1. 真实数据获取
     st.markdown("### 1. DATA ENRICHMENT")
     c1, c2 = st.columns([3, 1])
     with c1: st.info("Fetch real-time financial data to power the charts below.")
@@ -188,49 +228,44 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
 
     st.markdown("---")
     
-    # 2. 压力参数
     st.sidebar.markdown("### STRESS PARAMETERS")
     margin_shock = st.sidebar.slider("Margin Shock (-%)", 0, 15, 5) / 100.0
     tariff_shock = st.sidebar.slider("Tariff Shock (-%)", 0, 20, 10) / 100.0
     inv_limit = st.sidebar.slider("Inv Days Limit", 60, 200, 120)
     
-    # 3. 计算分数
     params = {'margin_shock': margin_shock, 'tariff_shock': tariff_shock, 'inv_limit': inv_limit}
     v6_res = df_work.apply(lambda row: calculate_score_v6(row, params), axis=1)
     df_final = pd.concat([df_work, v6_res], axis=1)
     
-    # 4. 四大核心图表展示区
     st.markdown("### 2. RISK VISUALIZATION COCKPIT")
     
-    # 定义 SCB 冷色系
     scb_colors = ["#2E3B4E", "#5D6D7E", "#90A4AE", "#B0BEC5", "#CFD8DC"]
     
-    # 创建 4 个 Tab，对应您上传的 4 个图表
     t1, t2, t3, t4, t5 = st.tabs([
-        "🗺️ 全行业信贷热力图", 
-        "🔵 竞争格局气泡图", 
-        "🎻 评级分布验证图", 
-        "🔥 因子相关性矩阵",
-        "📋 数据明细"
+        "全行业信贷热力图", 
+        "竞争格局气泡图", 
+        "评级分布验证图", 
+        "因子相关性矩阵",
+        "数据明细"
     ])
     
-    # Chart 1: 全行业信贷热力图 (Treemap)
+    # Chart 1: 恢复红绿灯配色 (RdYlGn)
     with t1:
-        st.markdown("**Chart 1: Industry Credit Heatmap** (Size=Score, Color=Rating)")
+        st.markdown("**Chart 1: Industry Credit Heatmap** (Green=Safe, Red=Risk)")
         if not df_final.empty:
             fig_tree = px.treemap(
                 df_final,
                 path=[px.Constant("PV Sector"), 'V6_Rating', '公司名称'],
                 values='V6_Score',
                 color='V6_Score',
-                color_continuous_scale='Blues', # 冷色调
+                color_continuous_scale='RdYlGn', # 关键修改：红黄绿
                 hover_data=['Stress_Margin', 'Inv_Days'],
                 height=550
             )
             fig_tree.update_layout(margin=dict(t=20, l=10, r=10, b=10))
             st.plotly_chart(fig_tree, use_container_width=True)
             
-    # Chart 2: 竞争格局气泡图 (Bubble)
+    # Chart 2: 保持 SCB 风格
     with t2:
         st.markdown("**Chart 2: Competition Landscape** (X=Margin, Y=Score)")
         if not df_final.empty:
@@ -244,7 +279,6 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
                 color_discrete_sequence=scb_colors,
                 height=550
             )
-            # 盈亏平衡线
             fig_bubble.add_vline(x=15, line_dash="dot", line_color="#333", annotation_text="Survival Line")
             fig_bubble.add_hline(y=60, line_dash="dot", line_color="#333", annotation_text="Investment Grade")
             fig_bubble.update_layout(
@@ -254,11 +288,10 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
             )
             st.plotly_chart(fig_bubble, use_container_width=True)
             
-    # Chart 3: 评级分布图 (Violin/Strip)
+    # Chart 3: 保持 SCB 风格
     with t3:
-        st.markdown("**Chart 3: Rating Distribution Validation** (Proving Discrimination Power)")
+        st.markdown("**Chart 3: Rating Distribution**")
         if not df_final.empty:
-            # 使用 Strip Plot 展示分布，比 Box Plot 更直观看到个体
             fig_dist = px.strip(
                 df_final.sort_values("V6_Rating"),
                 x="V6_Rating",
@@ -273,13 +306,11 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
             )
             st.plotly_chart(fig_dist, use_container_width=True)
             
-    # Chart 4: 相关性热力图 (Correlation)
+    # Chart 4: 恢复红蓝相关性配色 (RdBu)
     with t4:
-        st.markdown("**Chart 4: Factor Correlation Matrix** (Validating Methodology)")
+        st.markdown("**Chart 4: Factor Correlation Matrix** (Red=Strong, Blue=Negative)")
         if not df_final.empty:
-            # 选取数值型列计算相关性
             corr_cols = ['V6_Score', 'Stress_Margin', 'Inv_Days', '海外营收占比(%)', '资产负债率(%)']
-            # 确保列存在且为数字
             valid_cols = [c for c in corr_cols if c in df_final.columns]
             corr_matrix = df_final[valid_cols].corr()
             
@@ -287,13 +318,12 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
                 corr_matrix,
                 text_auto=".2f",
                 aspect="auto",
-                color_continuous_scale="Greys", # 高级灰
+                color_continuous_scale="RdBu_r", # 关键修改：红蓝
                 height=500
             )
             st.plotly_chart(fig_corr, use_container_width=True)
 
-    # 数据导出
     with t5:
         st.dataframe(df_final.sort_values("V6_Score", ascending=False), use_container_width=True)
         csv = df_final.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("💾 DOWNLOAD FULL REPORT", csv, "SCB_Risk_V6.csv", "text/csv")
+        st.download_button("💾 DOWNLOAD FULL REPORT", csv, "SCB_Risk_V7.csv", "text/csv")
