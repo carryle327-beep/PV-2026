@@ -315,7 +315,7 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
     with t2:
         show_cols = ['公司名称', '股票代码', 'V5_Rating', 'V5_Score', 'Stress_Margin', 'Overseas_Ratio', 'Inv_Days', 'Risks']
         st.dataframe(df_final[show_cols].sort_values("V5_Score", ascending=False), use_container_width=True)
-        with t2:
+    with t2:
         show_cols = ['公司名称', '股票代码', 'V5_Rating', 'V5_Score', 'Stress_Margin', 'Overseas_Ratio', 'Inv_Days', 'Risks']
         st.dataframe(df_final[show_cols].sort_values("V5_Score", ascending=False), use_container_width=True)
         
@@ -337,3 +337,4 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
             mime='text/csv',
             help="Click to save the crawled real-time data and V5 scores to a new file."
         )
+
