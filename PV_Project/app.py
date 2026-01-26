@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -6,193 +7,197 @@ import numpy as np
 import os
 import glob
 
-# --- 1. 页面配置 ---
-st.set_page_config(page_title="SCB光伏风控驾驶舱", layout="wide", initial_sidebar_state="expanded")
+# --- 1. 页面配置 (强制宽屏) ---
+st.set_page_config(page_title="SCB Risk Pilot", layout="wide", initial_sidebar_state="expanded")
 
-# --- 2. 渣打风格 CSS (严格修复版) ---
+# --- 2. 极致的高级感 CSS (机构灰风格) ---
 st.markdown("""
     <style>
-    /* 全局背景：极浅的商务灰 */
+    /* 1. 全局强制重置：覆盖所有 Streamlit 默认颜色 */
     .stApp {
-        background-color: #F2F5F8;
+        background-color: #F0F2F5 !important; /* 页面背景：高级冷灰 */
     }
     
-    /* 所有字体强制变深，防止看不见 */
-    h1, h2, h3, h4, h5, h6, p, li, span {
-        color: #0B0F32 !important; /* 深蓝黑 */
-        font-family: 'Arial', sans-serif;
+    /* 2. 字体优化：模拟金融终端的冷静感 */
+    html, body, [class*="css"] {
+        font-family: 'Helvetica Neue', 'Arial', sans-serif !important;
+        color: #1A1A1A !important; /* 近似纯黑的深灰，比纯黑更护眼 */
+    }
+    h1, h2, h3 {
+        font-weight: 700 !important;
+        letter-spacing: -0.5px !important; /* 紧凑字间距，显得高级 */
+        color: #0E1117 !important;
     }
     
-    /* 侧边栏样式 */
+    /* 3. 侧边栏：纯白高亮 */
     section[data-testid="stSidebar"] {
-        background-color: #FFFFFF; /* 纯白侧边栏 */
-        border-right: 1px solid #DDE1E6;
+        background-color: #FFFFFF !important;
+        border-right: 1px solid #E6E6E6;
+        box-shadow: 1px 0 5px rgba(0,0,0,0.02);
     }
     
-    /* 按钮样式：扁平、高级、渣打蓝 */
+    /* 4. 按钮：深岩石灰 (彻底告别橙色/蓝色) */
     .stButton>button {
-        background-color: #005EBB !important; /* 渣打蓝 */
-        color: white !important;
-        border-radius: 4px; /* 稍微方一点，更商务 */
+        background-color: #2E3B4E !important; /* 深岩灰：代表理性和稳重 */
+        color: #FFFFFF !important;
         border: none;
-        padding: 8px 20px;
-        font-weight: 500;
-        transition: background-color 0.2s;
+        border-radius: 2px !important; /* 只有2px圆角，非常硬朗 */
+        padding: 10px 24px;
+        font-size: 14px;
+        font-weight: 600;
+        text-transform: uppercase; /* 英文大写，增加气势 */
+        letter-spacing: 1px;
+        transition: all 0.2s;
     }
     .stButton>button:hover {
-        background-color: #004C99 !important; /* 深一点的蓝 */
-        border: none;
+        background-color: #1A2533 !important; /* 悬停变黑 */
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     
-    /* 去掉讨厌的红色警告框，改成中性蓝 */
-    .stAlert {
-        background-color: #E6F0FA;
-        border-left-color: #005EBB;
-        color: #0B0F32;
-    }
-    
-    /* 指标卡片 (Metric) */
+    /* 5. 指标卡片：极简纯白块 */
     div[data-testid="stMetric"] {
         background-color: #FFFFFF;
-        padding: 15px;
-        border-radius: 6px;
+        padding: 20px;
+        border-radius: 4px;
         border: 1px solid #E0E0E0;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
     }
-    /* 指标数值颜色：强制改为渣打绿 */
+    div[data-testid="stMetricLabel"] {
+        color: #666666 !important; /* 标签灰色 */
+        font-size: 14px !important;
+    }
     div[data-testid="stMetricValue"] {
-        color: #009F4D !important; /* 渣打绿 */
+        color: #0E1117 !important; /* 数值深黑色 */
+        font-size: 28px !important;
+        font-weight: 700 !important;
     }
     
-    /* 调整 Tab 样式 */
+    /* 6. 去除所有杂色装饰 */
+    .stAlert {
+        background-color: #F8F9FA;
+        border: 1px solid #E0E0E0;
+        color: #333;
+    }
+    
+    /* 7. Tab 页签样式 */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 20px;
+        gap: 8px;
+        background-color: transparent;
     }
     .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
-        background-color: #F2F5F8;
+        background-color: #FFFFFF;
+        border: 1px solid #E0E0E0;
         border-radius: 4px;
-        color: #0B0F32;
-        font-weight: 600;
+        color: #666;
+        padding: 8px 16px;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #005EBB !important;
+        background-color: #2E3B4E !important; /* 选中变深灰 */
         color: white !important;
+        border: none;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. 核心数据引擎 (2000-2026 连续年份) ---
+# --- 3. 数据生成 (连续历史) ---
 @st.cache_data
 def get_continuous_history():
-    # 关键节点
     anchors = {
-        2000: {"val": 15, "event": "起步期", "desc": "零星代工，技术积累。"},
-        2005: {"val": 30, "event": "尚德上市", "desc": "造富效应，资本涌入。"},
-        2008: {"val": 95, "event": "拥硅为王", "desc": "多晶硅天价泡沫。"},
-        2009: {"val": 40, "event": "金融危机", "desc": "泡沫破裂，需求骤降。"},
-        2011: {"val": 20, "event": "欧美双反", "desc": "至暗时刻，全行业亏损。"},
-        2013: {"val": 50, "event": "国内补贴", "desc": "政策救市，内需启动。"},
-        2016: {"val": 75, "event": "领跑者", "desc": "技术升级，单晶替代。"},
-        2018: {"val": 35, "event": "531新政", "desc": "断奶去补贴，行业洗牌。"},
-        2020: {"val": 85, "event": "碳中和", "desc": "双碳目标，估值重构。"},
-        2022: {"val": 100, "event": "欧洲危机", "desc": "俄乌冲突，出口井喷。"},
-        2024: {"val": 30, "event": "产能出清", "desc": "价格战底，剩者为王。"},
-        2026: {"val": 70, "event": "新周期", "desc": "AI算力缺电，需求反转。"}
+        2000: 15, 2005: 30, 2008: 95, 2009: 40, 
+        2011: 20, 2013: 50, 2016: 75, 2018: 35, 
+        2020: 85, 2022: 100, 2024: 30, 2026: 70
+    }
+    events = {
+        2000: "起步期", 2005: "尚德上市", 2008: "拥硅为王", 2009: "金融危机",
+        2011: "欧美双反", 2013: "国内补贴", 2016: "领跑者", 2018: "531新政",
+        2020: "碳中和", 2022: "俄乌冲突", 2024: "产能出清", 2026: "AI新周期"
     }
     
     full_years = list(range(2000, 2027))
-    data = []
-    
-    df_anchors = pd.DataFrame.from_dict(anchors, orient='index').reindex(full_years)
-    df_anchors['val'] = df_anchors['val'].interpolate(method='linear') # 插值
-    
-    for year in full_years:
-        row = df_anchors.loc[year]
-        event = row['event'] if pd.notna(row['event']) else "-"
-        desc = row['desc'] if pd.notna(row['desc']) else "行业平稳发展期"
-        data.append({"year": year, "index": round(row['val'], 1), "event": event, "desc": desc})
-        
-    return pd.DataFrame(data)
+    df = pd.DataFrame(index=full_years)
+    df['index'] = pd.Series(anchors).reindex(full_years).interpolate(method='linear')
+    df['event'] = pd.Series(events).reindex(full_years).fillna("-")
+    df = df.reset_index().rename(columns={'index': 'year', 0: 'val'}) # 修正列名
+    return df
 
-# --- 4. 导航 ---
-st.sidebar.title("🏦 SCB Risk Pilot")
-st.sidebar.info("Standard Chartered Bank Style")
-app_mode = st.sidebar.radio("Module / 模块:", ["📈 行业历史周期 (History)", "📊 企业信贷评级 (Credit)"])
+# --- 4. 侧边栏 (纯净版) ---
+st.sidebar.markdown("## 🏛️ SCB RISK PILOT")
+st.sidebar.caption("INSTITUTIONAL CLIENTS GROUP")
+st.sidebar.markdown("---")
+app_mode = st.sidebar.radio("MODULE SELECTOR", ["📈 MACRO CYCLE (历史周期)", "📊 CREDIT RATING (信贷评级)"])
 
 # =========================================================
-# 模块一：行业历史周期 (History) - 严禁红色
+# 模块一：历史周期 (冷色调)
 # =========================================================
-if app_mode == "📈 行业历史周期 (History)":
-    st.header("📈 中国光伏产业 26 年全景复盘 (2000-2026)")
+if app_mode == "📈 MACRO CYCLE (历史周期)":
+    st.markdown("### PV INDUSTRY CYCLE: 2000 - 2026")
+    st.caption("Historical Trend & Future Projection")
     
     df_hist = get_continuous_history()
     
     fig = go.Figure()
 
-    # 折线图：渣打蓝 (#005EBB) + 区域填充
+    # 线条：深岩灰 (#2E3B4E) 
     fig.add_trace(go.Scatter(
         x=df_hist['year'], 
-        y=df_hist['index'],
+        y=df_hist['val'],
         mode='lines+markers',
-        name='景气指数',
-        line=dict(color='#005EBB', width=3, shape='spline'), # 渣打蓝
+        name='Index',
+        line=dict(color='#2E3B4E', width=3), # 深灰线
         fill='tozeroy',
-        fillcolor='rgba(0, 94, 187, 0.08)', # 极淡的蓝色填充
-        marker=dict(size=6, color='white', line=dict(width=2, color='#009F4D')), # 渣打绿的生长点
-        hovertemplate="<b>%{x}年</b><br>指数: %{y}<br>事件: %{customdata[0]}<br>背景: %{customdata[1]}<extra></extra>",
-        customdata=np.stack((df_hist['event'], df_hist['desc']), axis=-1)
+        fillcolor='rgba(46, 59, 78, 0.1)', # 极淡的灰色填充
+        marker=dict(size=6, color='white', line=dict(width=2, color='#2E3B4E')), # 深灰点
+        hovertemplate="<b>%{x}</b><br>Index: %{y:.1f}<br>Event: %{customdata}<extra></extra>",
+        customdata=df_hist['event']
     ))
 
-    # 布局：极简商务
+    # 布局：极致简约
     fig.update_layout(
-        xaxis=dict(title="Year", tickmode='linear', dtick=1, showgrid=False, tickangle=-45),
-        yaxis=dict(title="Index", showgrid=True, gridcolor='#EEEEEE', zeroline=False), # 淡灰网格
+        xaxis=dict(tickmode='linear', dtick=1, showgrid=False, tickangle=-90, color='#666'),
+        yaxis=dict(showgrid=True, gridcolor='#E0E0E0', zeroline=False, color='#666'),
         height=500,
         plot_bgcolor='white',
-        hovermode="x unified",
-        margin=dict(l=20, r=20, t=30, b=40)
+        paper_bgcolor='white',
+        margin=dict(l=20, r=20, t=30, b=20),
+        hovermode="x unified"
     )
 
     st.plotly_chart(fig, use_container_width=True)
     
-    # 下方展示关键事件表 (只显示有大事的年份)
-    st.subheader("📋 关键历史节点")
+    # 关键事件表 (纯白背景)
+    st.markdown("#### KEY HISTORICAL EVENTS")
     key_events = df_hist[df_hist['event'] != "-"].sort_values("year", ascending=False)
     st.dataframe(
-        key_events[['year', 'event', 'desc']], 
+        key_events[['year', 'event']], 
         hide_index=True,
         use_container_width=True,
-        column_config={"year": "年份", "event": "关键事件", "desc": "背景描述"}
+        column_config={"year": "Year", "event": "Milestone"}
     )
 
 # =========================================================
-# 模块二：企业信贷评级 (Credit) - 严禁红色
+# 模块二：信贷评级 (冷色调)
 # =========================================================
-elif app_mode == "📊 企业信贷评级 (Credit)":
+elif app_mode == "📊 CREDIT RATING (信贷评级)":
     
     # 自动加载
     current_folder = os.path.dirname(os.path.abspath(__file__))
     xlsx_files = glob.glob(os.path.join(current_folder, "*.xlsx"))
     
     if not xlsx_files:
-        st.error("Data File Missing")
+        st.error("SYSTEM ERROR: Data file not found.")
         st.stop()
-        
+    
     file_path = xlsx_files[0]
     
-    # Sheet 选择
     try:
         sheet_names = pd.ExcelFile(file_path).sheet_names
-        selected_sheet = st.sidebar.selectbox("Select Sheet:", sheet_names)
+        selected_sheet = st.sidebar.selectbox("DATA SHEET", sheet_names)
     except:
         st.stop()
         
     @st.cache_data
     def load_data(s):
         df = pd.read_excel(file_path, sheet_name=s)
-        # 清洗
         for c in df.columns:
             if df[c].dtype == 'object': df[c] = df[c].fillna("-").astype(str)
             else: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
@@ -200,38 +205,38 @@ elif app_mode == "📊 企业信贷评级 (Credit)":
 
     df = load_data(selected_sheet)
     
-    # 筛选
-    st.sidebar.markdown("---")
+    # 筛选器
     if "信贷评级" in df.columns:
         opts = sorted(list(df["信贷评级"].unique()))
-        sel = st.sidebar.multiselect("Rating:", opts, default=opts)
+        sel = st.sidebar.multiselect("RATING FILTER", opts, default=opts)
     else:
         st.stop()
         
-    min_margin = st.sidebar.slider("Min Margin (%):", -50, 60, -50)
+    min_margin = st.sidebar.slider("MARGIN THRESHOLD (%)", -50, 60, -50)
     
     filtered_df = df[
         (df["信贷评级"].isin(sel)) & 
         (df["技术壁垒(毛利率%)"] >= min_margin)
     ]
     
-    st.header("🛡️ Corporate Credit Stress Test")
+    st.markdown("### CORPORATE CREDIT STRESS TEST")
+    st.caption(f"Source: {selected_sheet} | Companies: {len(filtered_df)}")
     
     # 指标卡
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Companies", f"{len(filtered_df)}")
-    c2.metric("Grade A", f"{len(filtered_df[filtered_df['综合得分']>=80])}")
-    c3.metric("Avg Margin", f"{filtered_df['技术壁垒(毛利率%)'].mean():.1f}%")
-    c4.metric("Avg Debt", f"{filtered_df['资产负债率(%)'].mean():.1f}%")
+    c1.metric("COVERAGE", f"{len(filtered_df)}")
+    c2.metric("GRADE A", f"{len(filtered_df[filtered_df['综合得分']>=80])}")
+    c3.metric("AVG MARGIN", f"{filtered_df['技术壁垒(毛利率%)'].mean():.1f}%")
+    c4.metric("AVG DEBT", f"{filtered_df['资产负债率(%)'].mean():.1f}%")
     
     st.markdown("---")
     
-    tab1, tab2 = st.tabs(["📊 Overview", "📋 Details"])
+    tab1, tab2 = st.tabs(["SCATTER PLOT", "DATA GRID"])
     
     with tab1:
         if not filtered_df.empty:
-            # 气泡图颜色：使用安全的蓝/绿/灰，不用红
-            # 手动定义颜色映射，防止 Plotly 自动用红色
+            # 颜色映射：强制使用冷色系 (蓝、灰、青)
+            # 绝对不使用红色/橙色
             fig = px.scatter(
                 filtered_df,
                 x="技术壁垒(毛利率%)",
@@ -240,11 +245,17 @@ elif app_mode == "📊 企业信贷评级 (Credit)":
                 color="信贷评级",
                 hover_name="公司名称",
                 height=500,
-                color_discrete_sequence=["#005EBB", "#009F4D", "#66CCFF", "#999999", "#FF9900"] # 蓝, 绿, 浅蓝, 灰, 橙(警告)
+                color_discrete_sequence=["#2E3B4E", "#5D6D7E", "#85929E", "#AED6F1", "#3498DB"] # 深灰到浅蓝
             )
-            # 盈亏平衡线：用橙色虚线代替红色实线
-            fig.add_vline(x=0, line_dash="dash", line_color="#FFA500", annotation_text="Breakeven")
-            fig.update_layout(plot_bgcolor="white", xaxis=dict(showgrid=True, gridcolor="#eee"), yaxis=dict(showgrid=True, gridcolor="#eee"))
+            
+            # 盈亏平衡线：改为深黑色虚线，极度克制
+            fig.add_vline(x=0, line_dash="dot", line_color="#333333", annotation_text="BREAKEVEN")
+            
+            fig.update_layout(
+                plot_bgcolor="white", 
+                xaxis=dict(showgrid=True, gridcolor="#F0F0F0", title="Gross Margin (%)"), 
+                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", title="Composite Score")
+            )
             st.plotly_chart(fig, use_container_width=True)
             
     with tab2:
