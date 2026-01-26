@@ -27,13 +27,13 @@ st.markdown("""
     html, body, p, span, div, label, li, a {
         color: #E0E0E0 !important;
         font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
-        font-weight: 400; /* 正文保持正常粗细 */
+        font-weight: 600; /* 正文保持正常粗细 */
     }
     
     /* =========== 核心修改：标题暴力加粗 =========== */
     h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
         color: #FFFFFF !important;
-        font-weight: 800 !important; /* 800 = 特粗 (Extra Bold) */
+        font-weight: 900 !important; /* 900 = 特粗 (Extra Bold) */
         font-family: 'Helvetica Neue', sans-serif !important;
         letter-spacing: 0.5px !important; /* 增加一点字间距，更显高级 */
         text-transform: uppercase; /* 建议：标题自动大写，更有投行感 (可选) */
@@ -55,11 +55,11 @@ st.markdown("""
     [data-testid="stMetricValue"] {
         color: #FFFFFF !important;
         font-family: 'Roboto Mono', monospace !important;
-        font-weight: 700 !important; /* 数字也要加粗 */
+        font-weight: 800 !important; /* 数字也要加粗 */
     }
     [data-testid="stMetricLabel"] {
         color: #AAAAAA !important; /* 标签稍微亮一点的灰 */
-        font-weight: 600 !important;
+        font-weight: 700 !important;
     }
     
     /* 5. 按钮：渣打蓝 */
@@ -68,7 +68,7 @@ st.markdown("""
         color: #FFFFFF !important;
         border: none;
         border-radius: 2px;
-        font-weight: 700 !important; /* 按钮文字加粗 */
+        font-weight: 800 !important; /* 按钮文字加粗 */
         text-transform: uppercase;
         letter-spacing: 1px;
     }
@@ -407,4 +407,5 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
         st.dataframe(df_final.sort_values("V14_Score", ascending=False), use_container_width=True)
         csv = df_final.to_csv(index=False).encode('utf-8-sig')
         st.download_button("💾 DOWNLOAD CSV", csv, "SCB_Risk_V14.csv", "text/csv")
+
 
