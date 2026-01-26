@@ -9,18 +9,27 @@ import time
 import akshare as ak
 
 # --- 1. 页面配置 ---
-st.set_page_config(page_title="SCB Risk Pilot V8.0", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SCB Risk Pilot V9.0", layout="wide", initial_sidebar_state="expanded")
 
-# --- 2. 极致机构灰 CSS (保持高级冷淡风，但允许图表彩色) ---
+# --- 2. 强制白底黑字 CSS (彻底消灭暗色模式) ---
 st.markdown("""
     <style>
-    .stApp { background-color: #F5F7F9 !important; }
-    html, body, p, h1, h2, h3, h4, h5, h6, span, div, label {
-        color: #000000 !important; font-family: 'Helvetica Neue', Arial, sans-serif !important;
-    }
-    section[data-testid="stSidebar"] { background-color: #FFFFFF !important; border-right: 1px solid #D1D1D1; }
+    /* 强制全局白底 */
+    .stApp { background-color: #FFFFFF !important; }
     
-    /* 控件去色，保持专业 */
+    /* 所有文字强制纯黑 */
+    html, body, p, h1, h2, h3, h4, h5, h6, span, div, label, text {
+        color: #000000 !important; 
+        font-family: 'Arial', sans-serif !important;
+    }
+    
+    /* 侧边栏 */
+    section[data-testid="stSidebar"] { 
+        background-color: #F8F9FA !important; 
+        border-right: 1px solid #E0E0E0; 
+    }
+    
+    /* 控件颜色修复 */
     div[data-baseweb="slider"] div[class*="css-"] { background-color: #2E3B4E !important; }
     div[role="slider"] { background-color: #2E3B4E !important; border-color: #2E3B4E !important; }
     
@@ -32,8 +41,13 @@ st.markdown("""
     .stButton>button:hover { background-color: #1C2430 !important; }
     
     /* 指标卡 */
-    div[data-testid="stMetric"] { background-color: #FFFFFF !important; border: 1px solid #D1D1D1; padding: 15px; }
-    div[data-testid="stMetricValue"] { font-size: 26px !important; }
+    div[data-testid="stMetric"] { 
+        background-color: #FFFFFF !important; 
+        border: 1px solid #CCCCCC; 
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        padding: 15px; 
+    }
+    div[data-testid="stMetricValue"] { font-size: 26px !important; color: #000 !important; }
     
     /* Tab 样式 */
     .stTabs [aria-selected="true"] {
@@ -85,7 +99,6 @@ def batch_fetch_data(df):
     df_real = pd.DataFrame(real_data_list)
     df_final = pd.concat([df.reset_index(drop=True), df_real], axis=1)
     
-    # 数据补全
     if '存货周转天数' not in df_final.columns: df_final['存货周转天数'] = 90
     df_final['存货周转天数'] = df_final['real_inventory_days'].fillna(df_final['存货周转天数'])
     df_final['海外营收占比(%)'] = df_final['real_overseas_ratio'].fillna(0)
@@ -93,18 +106,14 @@ def batch_fetch_data(df):
     return df_final
 
 # --- 4. 评分引擎 ---
-def calculate_score_v8(row, params):
+def calculate_score_v9(row, params):
     score = 0
-    reasons = []
     base_margin = row.get('最新毛利率', row['技术壁垒(毛利率%)'])
     
-    # 压力测试
     stress_margin = base_margin - (params['margin_shock'] * 100)
     if row.get('海外营收占比(%)', 0) > 50:
         stress_margin -= (params['tariff_shock'] * 100)
-        reasons.append("Tariff Hit")
         
-    # 赛道评分
     is_equipment = any(x in str(row['公司名称']) for x in ['设备', '激光', '机', '微导', '捷佳', '奥特维'])
     if is_equipment:
         if stress_margin >= 30: score += 40
@@ -113,34 +122,27 @@ def calculate_score_v8(row, params):
         if stress_margin >= 15: score += 30
         elif stress_margin >= 10: score += 15
         
-    # 库存与现金流
     inv = row.get('存货周转天数', 90)
-    if inv > params['inv_limit']: 
-        score -= 15
-        reasons.append(f"High Inv ({inv:.0f}d)")
+    if inv > params['inv_limit']: score -= 15
     else: score += 10
     
-    if row.get('每股经营现金流(元)', 0) < 0: 
-        score -= 20
-        reasons.append("CF Neg")
+    if row.get('每股经营现金流(元)', 0) < 0: score -= 20
     else: score += 20
     
-    # 第二曲线
     if row.get('第二曲线(储能)', False): score += 10
     
     final_score = min(100, max(0, score))
     
-    if final_score >= 80: rating = "A (Priority)"
-    elif final_score >= 60: rating = "B (Watch)"
-    elif final_score >= 40: rating = "C (Prudent)"
-    else: rating = "D (Exit)"
+    if final_score >= 80: rating = "A"
+    elif final_score >= 60: rating = "B"
+    elif final_score >= 40: rating = "C"
+    else: rating = "D"
     
-    return pd.Series([final_score, rating, stress_margin, inv, ", ".join(reasons)], 
-                     index=['V8_Score', 'V8_Rating', 'Stress_Margin', 'Inv_Days', 'Risks'])
+    return pd.Series([final_score, rating, stress_margin, inv], 
+                     index=['V9_Score', 'V9_Rating', 'Stress_Margin', 'Inv_Days'])
 
 # --- 5. 界面逻辑 ---
-st.sidebar.markdown("## SCB RISK PILOT V8.0")
-st.sidebar.caption("HTML STYLE REPLICATION")
+st.sidebar.markdown("## SCB RISK PILOT V9.0")
 st.sidebar.markdown("---")
 app_mode = st.sidebar.radio("MODULE", ["📈 MACRO HISTORY", "⚡ REAL-DATA STRESS TEST"])
 
@@ -150,18 +152,16 @@ if not xlsx_files: st.stop()
 file_path = xlsx_files[0]
 
 # =========================================================
-# 模块一：历史周期 (大事件直接显示版)
+# 模块一：历史周期 (大事件版)
 # =========================================================
 if app_mode == "📈 MACRO HISTORY":
     st.markdown("### PV INDUSTRY CYCLE HISTORY (2000-2026)")
     
-    # 1. 构造高波动数据
     anchors = {
         2000: 10,  2005: 40,  2008: 100, 2009: 25,
         2011: 15,  2013: 55,  2016: 85,  2018: 30,
         2020: 95,  2022: 100, 2024: 20,  2026: 85
     }
-    # 2. 构造大事件标签 (直接显示在图上)
     events_map = {
         2005: "尚德上市", 2008: "拥硅为王", 2009: "金融危机",
         2011: "欧美双反", 2013: "国内补贴", 2016: "领跑者计划",
@@ -170,33 +170,33 @@ if app_mode == "📈 MACRO HISTORY":
     
     full_years = list(range(2000, 2027))
     s_val = pd.Series(anchors).reindex(full_years).interpolate(method='linear')
-    s_event = pd.Series(events_map).reindex(full_years).fillna("") # 没有事件的填空字符串
+    s_event = pd.Series(events_map).reindex(full_years).fillna("")
     
     df_hist = pd.DataFrame({'year': full_years, 'val': s_val.values, 'label': s_event.values})
     
     fig = go.Figure()
     
-    # 绘制折线 + 标记 + 文字
     fig.add_trace(go.Scatter(
         x=df_hist['year'], 
         y=df_hist['val'], 
-        mode='lines+markers+text', # 关键：加上 text 模式
-        text=df_hist['label'],     # 关键：绑定文字列
-        textposition="top center", # 文字显示在点上方
-        textfont=dict(size=12, color='#000000', family="Arial Black"), # 黑色加粗字体
-        name='Cycle Index',
+        mode='lines+markers+text', 
+        text=df_hist['label'],     
+        textposition="top center", 
+        textfont=dict(size=13, color='#000000', family="Arial"),
+        name='Cycle',
         line=dict(color='#2E3B4E', width=3),
-        marker=dict(size=8, color='#D32F2F', line=dict(width=2, color='white')), # 红色点强调事件
+        marker=dict(size=9, color='#D32F2F', line=dict(width=2, color='white')),
         fill='tozeroy',
         fillcolor='rgba(46, 59, 78, 0.1)'
     ))
     
     fig.update_layout(
         plot_bgcolor='white', 
+        paper_bgcolor='white', # 强制白底
         height=600,
-        title="China PV Industry Cycle (Volatility & Key Events)",
-        xaxis=dict(showgrid=False, tickmode='linear', dtick=1, tickangle=-90),
-        yaxis=dict(showgrid=True, gridcolor='#EEE', title="Industry Sentiment Index")
+        title_font_color="black",
+        xaxis=dict(showgrid=False, tickmode='linear', dtick=1, tickangle=-90, color='black'),
+        yaxis=dict(showgrid=True, gridcolor='#F0F0F0', title="Sentiment", color='black')
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -213,16 +213,15 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
     def load_raw(p, s): return pd.read_excel(p, sheet_name=s)
     df_raw = load_raw(file_path, selected_sheet)
     
-    # 数据获取
-    st.markdown("### 1. DATA ENRICHMENT")
+    st.markdown("### DATA ENRICHMENT")
     c1, c2 = st.columns([3, 1])
-    with c1: st.info("Fetch real-time financial data to power the charts below.")
+    with c1: st.info("Fetch real-time financial data.")
     with c2: 
         if st.button("📡 FETCH REAL DATA"):
             with st.spinner("Crawling Data..."):
                 df_proc = batch_fetch_data(df_raw)
                 st.session_state['df_real'] = df_proc
-                st.success("Data Fetched!")
+                st.success("Fetched!")
                 
     if 'df_real' in st.session_state:
         df_work = st.session_state['df_real']
@@ -234,101 +233,102 @@ elif app_mode == "⚡ REAL-DATA STRESS TEST":
 
     st.markdown("---")
     
-    # 压力参数
     st.sidebar.markdown("### STRESS PARAMETERS")
     margin_shock = st.sidebar.slider("Margin Shock (-%)", 0, 15, 5) / 100.0
     tariff_shock = st.sidebar.slider("Tariff Shock (-%)", 0, 20, 10) / 100.0
     inv_limit = st.sidebar.slider("Inv Days Limit", 60, 200, 120)
     
-    # 计算
     params = {'margin_shock': margin_shock, 'tariff_shock': tariff_shock, 'inv_limit': inv_limit}
-    v8_res = df_work.apply(lambda row: calculate_score_v8(row, params), axis=1)
-    df_final = pd.concat([df_work, v8_res], axis=1)
+    v9_res = df_work.apply(lambda row: calculate_score_v9(row, params), axis=1)
+    df_final = pd.concat([df_work, v9_res], axis=1)
     
-    # 结果区
-    st.markdown("### 2. RISK VISUALIZATION COCKPIT")
+    st.markdown("### RISK COCKPIT")
     
     t1, t2, t3, t4, t5 = st.tabs([
-        " 全行业信贷热力图", 
-        " 竞争格局气泡图", 
-        " 评级分布验证图", 
-        " 因子相关性矩阵",
-        " 数据明细"
+        "🗺️ 全行业热力图 (1:1复刻)", 
+        "🔵 竞争格局气泡图", 
+        "🎻 评级分布验证图", 
+        "🔥 因子相关性矩阵 (1:1复刻)",
+        "📋 数据明细"
     ])
     
-    # Chart 1: 完美复刻上传文件 (RdYlGn)
+    # Chart 1: 1:1 复刻全行业热力图
+    # 修正点：使用 Treemap 并强制 RdYlGn 配色
     with t1:
-        st.markdown("**Chart 1: Industry Credit Heatmap** (Green=Safe, Red=Risk)")
+        st.markdown("**Chart 1: Industry Heatmap (Red-Yellow-Green)**")
         if not df_final.empty:
             fig_tree = px.treemap(
                 df_final,
-                path=[px.Constant("PV Sector"), 'V8_Rating', '公司名称'],
-                values='V8_Score',
-                color='V8_Score',
-                # 关键修改：强制使用红黄绿，复刻您上传的 HTML 风格
+                path=[px.Constant("PV Sector"), 'V9_Rating', '公司名称'],
+                values='V9_Score',
+                color='V9_Score',
+                # 强制红黄绿，范围固定0-100，确保低分红、高分绿
                 color_continuous_scale='RdYlGn', 
-                range_color=[0, 100], # 固定范围，保证颜色准
-                hover_data=['Stress_Margin', 'Inv_Days'],
-                height=550
+                range_color=[0, 100], 
+                height=600
             )
-            fig_tree.update_layout(margin=dict(t=20, l=10, r=10, b=10))
+            fig_tree.update_traces(
+                textinfo="label+value",
+                textfont=dict(size=14),
+                marker=dict(line=dict(width=2, color='white')) # 加白边框，方块更分明
+            )
+            fig_tree.update_layout(margin=dict(t=0, l=0, r=0, b=0))
             st.plotly_chart(fig_tree, use_container_width=True)
             
-    # Chart 2: 保持 SCB 风格
+    # Chart 2
     with t2:
-        st.markdown("**Chart 2: Competition Landscape**")
         if not df_final.empty:
             fig_bubble = px.scatter(
-                df_final,
-                x="Stress_Margin",
-                y="V8_Score",
-                size="V8_Score",
-                color="V8_Rating",
-                hover_name="公司名称",
-                # 这里保持冷色系以区分
-                color_discrete_sequence=["#2E3B4E", "#5D6D7E", "#90A4AE", "#B0BEC5", "#CFD8DC"],
-                height=550
+                df_final, x="Stress_Margin", y="V9_Score", size="V9_Score", color="V9_Rating",
+                hover_name="公司名称", color_discrete_sequence=["#2E3B4E", "#5D6D7E", "#90A4AE", "#CFD8DC"], height=550
             )
-            fig_bubble.add_vline(x=15, line_dash="dot", line_color="#333")
-            fig_bubble.add_hline(y=60, line_dash="dot", line_color="#333")
-            fig_bubble.update_layout(plot_bgcolor="white", xaxis=dict(showgrid=True, gridcolor="#EEE"), yaxis=dict(showgrid=True, gridcolor="#EEE"))
+            fig_bubble.update_layout(plot_bgcolor="white", xaxis=dict(showgrid=True, gridcolor="#F0F0F0"), yaxis=dict(showgrid=True, gridcolor="#F0F0F0"))
             st.plotly_chart(fig_bubble, use_container_width=True)
             
-    # Chart 3: 保持 SCB 风格
+    # Chart 3
     with t3:
-        st.markdown("**Chart 3: Rating Distribution**")
         if not df_final.empty:
             fig_dist = px.strip(
-                df_final.sort_values("V8_Rating"),
-                x="V8_Rating",
-                y="V8_Score",
-                color="V8_Rating",
-                color_discrete_sequence=["#2E3B4E", "#5D6D7E", "#90A4AE", "#B0BEC5", "#CFD8DC"],
-                height=500
+                df_final.sort_values("V9_Rating"), x="V9_Rating", y="V9_Score", color="V9_Rating",
+                color_discrete_sequence=["#2E3B4E", "#5D6D7E", "#90A4AE", "#CFD8DC"], height=500
             )
-            fig_dist.update_layout(plot_bgcolor="white", yaxis=dict(showgrid=True, gridcolor="#EEE"))
+            fig_dist.update_layout(plot_bgcolor="white", yaxis=dict(showgrid=True, gridcolor="#F0F0F0"))
             st.plotly_chart(fig_dist, use_container_width=True)
             
-    # Chart 4: 完美复刻上传文件 (RdBu)
+    # Chart 4: 1:1 复刻相关性热力图
+    # 修正点：使用 go.Heatmap 而非 px.imshow，强制背景白，强制显示数字，消灭黑底
     with t4:
-        st.markdown("**Chart 4: Factor Correlation Matrix** (Red=Positive, Blue=Negative)")
+        st.markdown("**Chart 4: Correlation Matrix (Red-White-Blue)**")
         if not df_final.empty:
-            corr_cols = ['V8_Score', 'Stress_Margin', 'Inv_Days', '海外营收占比(%)', '资产负债率(%)']
+            # 准备数据
+            corr_cols = ['V9_Score', 'Stress_Margin', 'Inv_Days', '海外营收占比(%)', '资产负债率(%)']
             valid_cols = [c for c in corr_cols if c in df_final.columns]
-            corr_matrix = df_final[valid_cols].corr()
+            # 填充 NaN 为 0，防止缺块
+            corr_matrix = df_final[valid_cols].corr().fillna(0)
             
-            fig_corr = px.imshow(
-                corr_matrix,
-                text_auto=".2f",
-                aspect="auto",
-                # 关键修改：强制使用红蓝对抗色，复刻您上传的 HTML 风格
-                color_continuous_scale="RdBu_r", 
-                zmin=-1, zmax=1, # 固定范围
-                height=500
+            # 使用 Graph Objects 进行底层绘制，控制力更强
+            fig_corr = go.Figure(data=go.Heatmap(
+                z=corr_matrix.values,
+                x=corr_matrix.columns,
+                y=corr_matrix.index,
+                colorscale='RdBu_r', # 红白蓝 (Reverse)
+                zmin=-1, zmax=1,     # 固定范围
+                text=np.round(corr_matrix.values, 2), # 显示数字
+                texttemplate="%{text}",               # 强制显示文本
+                textfont={"size": 14, "color": "black"}, # 黑色字体，防止看不见
+                xgap=2, ygap=2 # 格子间距，防止粘连
+            ))
+            
+            fig_corr.update_layout(
+                height=600,
+                plot_bgcolor='white',  # 强制白底
+                paper_bgcolor='white', # 强制白底
+                xaxis=dict(side="bottom"),
+                margin=dict(t=20, l=20, r=20, b=20)
             )
             st.plotly_chart(fig_corr, use_container_width=True)
 
     with t5:
-        st.dataframe(df_final.sort_values("V8_Score", ascending=False), use_container_width=True)
+        st.dataframe(df_final.sort_values("V9_Score", ascending=False), use_container_width=True)
         csv = df_final.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("💾 DOWNLOAD FULL REPORT", csv, "SCB_Risk_V8.csv", "text/csv")
+        st.download_button("💾 DOWNLOAD CSV", csv, "SCB_Risk_V9.csv", "text/csv")
