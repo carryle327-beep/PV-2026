@@ -141,34 +141,50 @@ def main():
         """, unsafe_allow_html=True)
         
         st.write("")
+   # --- 修复后的 PDF 生成逻辑 (防止中文报错) ---
         if st.button(f"📄 导出 {row['Company']} 报告"):
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", "B", 16)
-            pdf.cell(0, 10, f"CREDIT REPORT: {row['Ticker']}", 0, 1) # 标题用代码
-            pdf.set_font("Arial", "", 12)
-            pdf.cell(0, 10, f"Company: {row['Company']} (Simulated Name)", 0, 1) # 中文名在PDF可能乱码，这里做演示
-            pdf.cell(0, 10, f"Rating: {row['Rating']} | Score: {row['Score']:.1f}", 0, 1)
-            pdf.line(10, 40, 200, 40)
-            pdf_bytes = bytes(pdf.output())
-            st.download_button("📥 下载 PDF", pdf_bytes, f"Report_{row['Ticker']}.pdf", "application/pdf")
+            try:
+                # 1. 提取纯英文/数字信息 (Sanitize Data)
+                # 只有这样才能在不安装额外字体的情况下生成 PDF
+                ticker_safe = str(row['Ticker']).strip()
+                score_safe = f"{row['Score']:.1f}"
+                pd_safe = f"{row['PD_Prob']:.2%}"
+                
+                # 处理评级：把 "AAA (极好)" 拆开，只取前面的 "AAA"
+                rating_safe = row['Rating'].split(' ')[0] 
+                
+                # 2. 生成 PDF
+                pdf = FPDF()
+                pdf.add_page()
+                
+                # 标题：只显示代码，不显示中文名
+                pdf.set_font("Arial", "B", 24)
+                pdf.cell(0, 20, f"CREDIT MEMO: {ticker_safe}", 0, 1, 'C')
+                
+                pdf.line(10, 30, 200, 30)
+                pdf.ln(10)
+                
+                # 正文：全部使用英文标签
+                pdf.set_font("Arial", "", 12)
+                pdf.cell(0, 10, f"Report Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
+                pdf.cell(0, 10, f"Credit Score: {score_safe} / 100", 0, 1)
+                pdf.cell(0, 10, f"Internal Rating: {rating_safe}", 0, 1)
+                pdf.cell(0, 10, f"Probability of Default: {pd_safe}", 0, 1)
+                
+                pdf.ln(10)
+                pdf.set_font("Arial", "I", 10)
+                pdf.cell(0, 10, "Note: Company name is omitted to support universal encoding.", 0, 1)
 
-    with c2:
-        # 雷达对比
-        avg_score = df_final['Score'].mean()
-        fig = go.Figure()
-        fig.add_trace(go.Bar(y=['评分', '折后毛利'], x=[avg_score, df_final['Stressed_GM'].mean()], name='行业平均', orientation='h', marker_color='#333'))
-        fig.add_trace(go.Bar(y=['评分', '折后毛利'], x=[row['Score'], row['Stressed_GM']], name=row['Company'], orientation='h', marker_color='#00E5FF'))
-        fig.update_layout(template="plotly_dark", height=300, margin=dict(l=0,r=0,t=30,b=0))
-        st.plotly_chart(fig, use_container_width=True)
-
-    # 全局热力图
-    st.markdown("---")
-    st.subheader("🌍 全市场概览")
-    fig_map = px.treemap(df_final, path=[px.Constant("全市场"), 'Rating', 'Search_Label'], values='Score',
-                         color='Score', color_continuous_scale='RdYlGn')
-    fig_map.update_layout(template="plotly_dark", height=450)
-    st.plotly_chart(fig_map, use_container_width=True)
-
-if __name__ == "__main__":
-    main()
+                # 3. 输出二进制流 (修复 output 报错)
+                pdf_bytes = bytes(pdf.output())
+                
+                # 4. 触发下载
+                st.download_button(
+                    label="📥 点击下载英文审计报告 (PDF)",
+                    data=pdf_bytes,
+                    file_name=f"Report_{ticker_safe}.pdf",
+                    mime="application/pdf"
+                )
+                
+            except Exception as e:
+                st.error(f"PDF生成失败: {str(e)}")
