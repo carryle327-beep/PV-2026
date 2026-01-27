@@ -309,10 +309,11 @@ def main():
         pdf.set_y(-30)
         pdf.set_font("Arial", "I", 8)
         pdf.multi_cell(0, 5, "Model Methodology: Logistic Regression based on expert-calibrated coefficients. PD represents 12-month forward-looking probability under stressed assumptions.")
-        
-        pdf_bytes = pdf.output()
+    # 强制转换为 bytes 类型，满足 Streamlit 的严格要求
+        pdf_bytes = bytes(pdf.output())
         st.download_button("📥 DOWNLOAD PDF", pdf_bytes, "V18_FullStack_Report.pdf", "application/pdf")
 
 if __name__ == "__main__":
     main()
+
 
