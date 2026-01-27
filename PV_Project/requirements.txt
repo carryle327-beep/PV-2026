@@ -3,5 +3,6 @@ pandas
 openpyxl
 plotly
 akshare
-fpdf
+fpdf2
 numpy
+
