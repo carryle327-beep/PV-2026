@@ -5,4 +5,5 @@ plotly
 akshare
 fpdf2
 numpy
+matplotlib
 
