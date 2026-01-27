@@ -310,8 +310,9 @@ def main():
         pdf.set_font("Arial", "I", 8)
         pdf.multi_cell(0, 5, "Model Methodology: Logistic Regression based on expert-calibrated coefficients. PD represents 12-month forward-looking probability under stressed assumptions.")
         
-        pdf_bytes = pdf.output(dest='S').encode('latin-1')
+        pdf_bytes = pdf.output()
         st.download_button("📥 DOWNLOAD PDF", pdf_bytes, "V18_FullStack_Report.pdf", "application/pdf")
 
 if __name__ == "__main__":
     main()
+
