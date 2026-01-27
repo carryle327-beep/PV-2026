@@ -9,25 +9,25 @@ from fpdf import FPDF
 import math
 
 # ==========================================
-# 1. 宏观周期模型 (Macro Cycle Model)
+# 1. 宏观周期模型 (决定是大环境好还是坏)
 # ==========================================
 class MacroModel:
     @staticmethod
     def get_cycle_status(year_float):
         """
-        模拟光伏行业周期 (正弦波 + 趋势项)
-        返回: 周期分数 (-1.0 到 1.0) 和 状态描述
+        用正弦波模拟光伏行业的“看天吃饭”
+        返回: 宏观得分, 中文状态描述
         """
-        # 周期逻辑: 约 3-4 年一个短周期
+        # 模拟 3.5 年一个周期
         cycle_component = np.sin(year_float * (2 * np.pi / 3.5)) 
-        trend_component = 0.05 * (year_float - 2020) # 长期向上
+        trend_component = 0.05 * (year_float - 2020) # 行业长期是向上的
         macro_score = cycle_component + trend_component
         
-        # 状态判定
-        if macro_score > 0.5: status = "Overheated (Top)"
-        elif macro_score > 0: status = "Expansion (Mid-Cycle)"
-        elif macro_score > -0.5: status = "Contraction (Downturn)"
-        else: status = "Trough (Bottom)"
+        # 翻译成中文状态
+        if macro_score > 0.5: status = "过热期 (顶部风险)"
+        elif macro_score > 0: status = "扩张期 (复苏中)"
+        elif macro_score > -0.5: status = "衰退期 (下行压力)"
+        else: status = "萧条期 (谷底磨底)"
         
         return macro_score, status
 
@@ -37,107 +37,117 @@ class MacroModel:
         scores = [MacroModel.get_cycle_status(y)[0] for y in years]
         
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=years, y=scores, mode='lines', name='Industry Cycle', line=dict(color='#00E5FF', width=3)))
+        fig.add_trace(go.Scatter(x=years, y=scores, mode='lines', name='行业周期曲线', line=dict(color='#00E5FF', width=3)))
         
         # 标记当前时间点
         current_year = datetime.now().year + datetime.now().month / 12.0
         current_score, current_status = MacroModel.get_cycle_status(current_year)
         
-        fig.add_trace(go.Scatter(x=[current_year], y=[current_score], mode='markers', name='NOW', 
+        fig.add_trace(go.Scatter(x=[current_year], y=[current_score], mode='markers', name='当前位置', 
                                 marker=dict(size=12, color='#FF3D00', symbol='diamond')))
         
         fig.update_layout(
-            title="PV INDUSTRY MACRO CYCLE (THEORY)",
+            title="光伏行业宏观周期模型 (理论值)",
             template="plotly_dark",
-            xaxis_title="Year",
-            yaxis_title="Cycle Sentiment",
+            xaxis_title="年份",
+            yaxis_title="景气度指数",
             height=250,
             margin=dict(l=20, r=20, t=40, b=20),
             paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)'
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Microsoft YaHei") # 尝试适配中文
         )
         return fig, current_status
 
 # ==========================================
-# 2. 情景管理器 (Scenario Manager)
+# 2. 情景管理器 (这里就是你的“剧本”)
 # ==========================================
 class ScenarioManager:
+    # 这里定义了四种不同的未来剧本
     SCENARIOS = {
-        "Base Case": {
-            "margin_shock_bps": 0, "tariff_shock_pct": 0.0, "market_demand_adj": 1.0, "desc": "Current Market Conditions"
+        "基准情形 (Base Case)": {
+            "margin_shock_bps": 0, "tariff_shock_pct": 0.0, "market_demand_adj": 1.0, 
+            "desc": "当前市场维持现状，无重大突发利空。"
         },
-        "Trade War 2025 (Severe)": {
-            "margin_shock_bps": 300, "tariff_shock_pct": 0.25, "market_demand_adj": 0.8, "desc": "High Tariffs & Export Ban"
+        "2025 贸易战 (严峻模式)": {
+            "margin_shock_bps": 300, "tariff_shock_pct": 0.35, "market_demand_adj": 0.8, 
+            "desc": "关税大幅提升至 35%，且出口受阻，毛利承压。"
         },
-        "Price War (Deflation)": {
-            "margin_shock_bps": 800, "tariff_shock_pct": 0.0, "market_demand_adj": 1.2, "desc": "Domestic Price War to Clear Inventory"
+        "国内价格战 (内卷模式)": {
+            "margin_shock_bps": 800, "tariff_shock_pct": 0.0, "market_demand_adj": 1.2, 
+            "desc": "为清库存爆发惨烈价格战，全行业毛利暴跌 8%。"
         },
-        "Tech Disruption (N-Type)": {
-            "margin_shock_bps": 200, "tariff_shock_pct": 0.05, "market_demand_adj": 0.9, "desc": "Old Capacity Obsolescence"
+        "技术路线迭代 (P型淘汰)": {
+            "margin_shock_bps": 200, "tariff_shock_pct": 0.05, "market_demand_adj": 0.9, 
+            "desc": "旧产能被淘汰，相关资产减值风险增加。"
         }
     }
 
 # ==========================================
-# 3. 核心算法: Logistic Regression Logic
+# 3. 核心算法 (把财务变成概率的“榨汁机”)
 # ==========================================
 class CreditEnginePro:
     @staticmethod
     def sigmoid(z):
+        # S型函数：把任意分数压缩到 0-1 之间
         return 1 / (1 + np.exp(-z))
 
     @staticmethod
     def calculate_pd_score(row, scenario_params, macro_status):
         """
-        使用 Logit 变换计算违约概率 (PD) 并映射为分数
-        Formula: Log(Odds) = Intercept + B1*X1 + B2*X2 ...
+        计算逻辑：
+        1. 拿原始数据
+        2. 根据选定的剧本（贸易战/价格战）扣减利润
+        3. 用 Logit 公式算出总分
+        4. 用 Sigmoid 算出违约率 (PD)
         """
-        # 1. 因子提取与压力测试
-        # 毛利 (Gross Margin)
+        # --- 第一步：压力测试 ---
+        # 1. 毛利率冲击：比如价格战，毛利直接减去 8%
         base_gm = row['Gross Margin']
         stressed_gm = base_gm - (scenario_params['margin_shock_bps'] / 100.0)
-        # 关税冲击 (Tariff Hit)
+        
+        # 2. 关税冲击：只有海外收入部分会被扣税
         overseas_exposure = row['Overseas Ratio'] / 100.0
+        # 关税伤害 = 海外占比 * 关税税率
         tariff_hit = overseas_exposure * scenario_params['tariff_shock_pct'] * 100
+        
+        # 最终的“压力后毛利率”
         final_gm = stressed_gm - tariff_hit
         
-        # 存货周转 (Inventory)
-        inv_days = row['Inventory Days']
+        # --- 第二步：提取其他因子 ---
+        inv_days = row['Inventory Days'] # 库存天数
+        cf_flag = 1 if row['Cash Flow'] > 0 else 0 # 现金流是不是正的
         
-        # 现金流覆盖 (Cash Flow Coverage) -> 简化为 0/1 因子
-        cf_flag = 1 if row['Cash Flow'] > 0 else 0
-        
-        # 2. 宏观校准 (Macro Calibration)
+        # --- 第三步：宏观环境校准 ---
+        # 如果是大环境不好（衰退/萧条），给所有人的分再扣一点
         macro_adj = 0
-        if "Downturn" in macro_status or "Trough" in macro_status:
-            macro_adj = -0.5 # 宏观环境差，Log-odds 偏向违约
+        if "衰退" in macro_status or "萧条" in macro_status:
+            macro_adj = -0.5 
         
-        # 3. Logit 模型计算 (模拟系数 - Expert Calibrated)
-        # Logit(Default) = Intercept - a*Margin + b*Inventory - c*CashFlow + Macro
-        # 注意：这里我们算的是“违约的 Log-odds”，所以因子符号要小心
-        # Margin 越高，违约越低 (负号)
-        # Inventory 越高，违约越高 (正号)
+        # --- 第四步：Logit 评分公式 (核心) ---
+        # Z = 基础分 + (权重1 * 毛利) + (权重2 * 库存) ...
+        # 注意：库存越高越不好，所以系数要是正的（因为我们在算违约的概率）
         
         intercept = -1.0 
-        coef_gm = -0.15      # 毛利每高 1%，Log-odds 降低 0.15
-        coef_inv = 0.02      # 存货每高 1天，Log-odds 增加 0.02
-        coef_cf = -0.8       # 正现金流，Log-odds 降低 0.8
+        coef_gm = -0.15      # 毛利高，违约概率低 (负号)
+        coef_inv = 0.02      # 库存高，违约概率高 (正号)
+        coef_cf = -1.5       # 现金流为正，违约概率大幅降低 (我是导师建议你改的权重)
         
         logit_z = intercept + (coef_gm * final_gm) + (coef_inv * inv_days) + (coef_cf * cf_flag) + macro_adj
         
-        # 4. 转化为 PD (Probability of Default)
+        # --- 第五步：算出违约率 (PD) ---
         pd_value = CreditEnginePro.sigmoid(logit_z)
         
-        # 5. PD 映射为分数 (Score = 100 * (1 - PD))
-        # 做一些平滑处理，避免 0 或 100
+        # --- 第六步：换算成 0-100 的信用分 ---
         score = 100 * (1 - pd_value)
         
-        # 评级
-        if score >= 85: rating = "AAA"
-        elif score >= 70: rating = "AA"
-        elif score >= 55: rating = "BBB"
-        elif score >= 40: rating = "BB"
-        elif score >= 25: rating = "B"
-        else: rating = "CCC"
+        # 评级映射
+        if score >= 85: rating = "AAA (极好)"
+        elif score >= 70: rating = "AA (优良)"
+        elif score >= 55: rating = "BBB (投资级)"
+        elif score >= 40: rating = "BB (投机级)"
+        elif score >= 25: rating = "B (高风险)"
+        else: rating = "CCC (垃圾级)"
         
         return pd.Series({
             'Stressed_GM': final_gm,
@@ -148,93 +158,86 @@ class CreditEnginePro:
         })
 
 # ==========================================
-# 4. UI 渲染引擎 (V18.0 Black Gold)
+# 4. 界面渲染 (全中文)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V18.0", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="全球信贷透视系统 V18 (CN)", layout="wide", page_icon="🏦")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #000000 !important; color: #E0E0E0; font-family: 'Helvetica Neue', sans-serif; }
+    .stApp { background-color: #000000 !important; color: #E0E0E0; font-family: 'Microsoft YaHei', sans-serif; }
     [data-testid="stSidebar"] { background-color: #050505 !important; border-right: 1px solid #333; }
-    h1, h2, h3 { color: #00E5FF !important; text-transform: uppercase; font-weight: 800 !important; }
+    h1, h2, h3 { color: #00E5FF !important; font-weight: 800 !important; }
     .stMetric { background-color: #111; border: 1px solid #333; border-left: 4px solid #0056D2; padding: 15px; }
-    .stSelectbox label { color: #00E5FF !important; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# 5. 主程序逻辑
-# ==========================================
 def main():
-    # --- 侧边栏：情景与参数 ---
-    st.sidebar.title("🎮 SCENARIO LAB")
+    # --- 侧边栏 ---
+    st.sidebar.title("⚙️ 情景实验室")
     
-    # 1. 宏观周期展示
-    st.sidebar.markdown("### 1. MACRO CYCLE POSITION")
+    # 1. 宏观
+    st.sidebar.markdown("### 1. 宏观周期位置")
     macro_fig, macro_status = MacroModel.plot_cycle_curve()
     st.sidebar.plotly_chart(macro_fig, use_container_width=True)
-    st.sidebar.info(f"Current Phase: **{macro_status}**")
+    st.sidebar.info(f"当前阶段: **{macro_status}**")
     
-    # 2. 情景选择器
-    st.sidebar.markdown("### 2. STRESS SCENARIO")
-    selected_scenario_name = st.sidebar.selectbox("Select Market Scenario", list(ScenarioManager.SCENARIOS.keys()))
+    # 2. 剧本选择
+    st.sidebar.markdown("### 2. 压力测试剧本")
+    selected_scenario_name = st.sidebar.selectbox("选择市场剧本", list(ScenarioManager.SCENARIOS.keys()))
     scenario_params = ScenarioManager.SCENARIOS[selected_scenario_name]
     
-    # 展示参数详情
-    with st.sidebar.expander("Scenario Parameters", expanded=True):
-        st.write(f"📉 Margin Compression: **{scenario_params['margin_shock_bps']} bps**")
-        st.write(f"🚢 Tariff Shock: **{scenario_params['tariff_shock_pct']:.0%}**")
-        st.write(f"🛒 Demand Adj: **{scenario_params['market_demand_adj']}x**")
-        st.caption(f"📝 {scenario_params['desc']}")
+    with st.sidebar.expander("查看剧本参数详情", expanded=True):
+        st.write(f"📉 毛利冲击: **{scenario_params['margin_shock_bps']} 基点**")
+        st.write(f"🚢 关税冲击: **{scenario_params['tariff_shock_pct']:.0%}** (针对海外收入)")
+        st.write(f"🛒 市场需求: **{scenario_params['market_demand_adj']}倍**")
+        st.caption(f"📝 说明: {scenario_params['desc']}")
 
     # --- 主界面 ---
     c1, c2 = st.columns([3, 1])
     with c1:
-        st.title("GLOBAL CREDIT LENS | V18.0")
-        st.caption(f"LOGIT-BASED PROBABILITY OF DEFAULT MODEL | MODE: {selected_scenario_name.upper()}")
+        st.title("全球信贷透视系统 | V18.0 中文版")
+        st.caption(f"基于逻辑回归 (Logistic Regression) 的动态风控模型 | 当前模式: {selected_scenario_name}")
     with c2:
-        st.metric("MODEL ENGINE", "LOGISTIC REGRESSION", "Sigmoid Activation")
+        st.metric("核心算法引擎", "Logit 回归", "Sigmoid 激活")
 
-    # --- 数据模拟 (Mock Data) ---
+    # --- 模拟数据 (这里你可以改成真实的) ---
     data = [
-        {'Ticker': '600438.SH', 'Company Name': 'Tongwei Solar', 'Gross Margin': 28.5, 'Overseas Ratio': 25.0, 'Inventory Days': 85, 'Cash Flow': 1},
-        {'Ticker': '300750.SZ', 'Company Name': 'CATL', 'Gross Margin': 22.0, 'Overseas Ratio': 35.0, 'Inventory Days': 70, 'Cash Flow': 1},
-        {'Ticker': '688599.SH', 'Company Name': 'Trina Solar', 'Gross Margin': 15.5, 'Overseas Ratio': 60.0, 'Inventory Days': 110, 'Cash Flow': 0},
-        {'Ticker': '002459.SZ', 'Company Name': 'Jinko Power', 'Gross Margin': 14.0, 'Overseas Ratio': 72.0, 'Inventory Days': 140, 'Cash Flow': 1},
-        {'Ticker': '601012.SH', 'Company Name': 'Longi Green', 'Gross Margin': 18.0, 'Overseas Ratio': 45.0, 'Inventory Days': 95, 'Cash Flow': 1}
+        {'Ticker': '600438.SH', 'Company Name': '通威股份 (Tongwei)', 'Gross Margin': 28.5, 'Overseas Ratio': 25.0, 'Inventory Days': 85, 'Cash Flow': 1},
+        {'Ticker': '300750.SZ', 'Company Name': '宁德时代 (CATL)', 'Gross Margin': 22.0, 'Overseas Ratio': 35.0, 'Inventory Days': 70, 'Cash Flow': 1},
+        {'Ticker': '688599.SH', 'Company Name': '天合光能 (Trina)', 'Gross Margin': 15.5, 'Overseas Ratio': 60.0, 'Inventory Days': 110, 'Cash Flow': 0},
+        {'Ticker': '002459.SZ', 'Company Name': '晶科能源 (Jinko)', 'Gross Margin': 14.0, 'Overseas Ratio': 72.0, 'Inventory Days': 140, 'Cash Flow': 1},
+        {'Ticker': '601012.SH', 'Company Name': '隆基绿能 (Longi)', 'Gross Margin': 18.0, 'Overseas Ratio': 45.0, 'Inventory Days': 95, 'Cash Flow': 1}
     ]
     df = pd.DataFrame(data)
 
-    # --- 计算引擎运行 ---
-    # 传入宏观状态和情景参数
+    # --- 运行计算 ---
     res = df.apply(lambda r: CreditEnginePro.calculate_pd_score(r, scenario_params, macro_status), axis=1)
     df_final = pd.concat([df, res], axis=1)
 
-    # --- 结果可视化 ---
+    # --- 结果展示 ---
     
-    # Row 1: 核心指标
+    # 核心指标卡
     k1, k2, k3, k4 = st.columns(4)
     avg_pd = df_final['PD_Prob'].mean()
-    high_risk_num = len(df_final[df_final['Rating'].isin(['B', 'CCC'])])
+    high_risk_num = len(df_final[df_final['V18_Score'] < 40])
     
-    k1.metric("PORTFOLIO AVG PD", f"{avg_pd:.2%}", delta="Probability of Default", delta_color="inverse")
-    k2.metric("AVG CREDIT SCORE", f"{df_final['V18_Score'].mean():.1f}", delta="Logit Mapped")
-    k3.metric("HIGH RISK ENTITIES", str(high_risk_num), delta="Watch List", delta_color="inverse")
-    k4.metric("MACRO OVERLAY", macro_status, "Cycle Adjustment Applied")
+    k1.metric("组合平均违约率 (PD)", f"{avg_pd:.2%}", delta="越低越好", delta_color="inverse")
+    k2.metric("平均信用分", f"{df_final['V18_Score'].mean():.1f}", delta="满分100")
+    k3.metric("高风险主体数", str(high_risk_num), delta="需重点关注", delta_color="inverse")
+    k4.metric("宏观校准", macro_status, "已应用周期因子")
 
-    # Row 2: PD 曲线与气泡图
-    st.markdown("### 📊 RISK TOPOGRAPHY")
+    # 图表区
+    st.markdown("### 📊 风险全景图")
     t1, t2 = st.columns([2, 1])
     
     with t1:
-        # 绘制 S 曲线 (Sigmoid Curve) 展示位置
+        # S型曲线图
         x_range = np.linspace(-6, 6, 100)
         y_range = 1 / (1 + np.exp(-x_range))
         
         fig_logit = go.Figure()
-        fig_logit.add_trace(go.Scatter(x=x_range, y=y_range, mode='lines', name='Logistic Function', line=dict(color='#444', dash='dash')))
+        fig_logit.add_trace(go.Scatter(x=x_range, y=y_range, mode='lines', name='Sigmoid 曲线', line=dict(color='#444', dash='dash')))
         
-        # 将公司投射到 S 曲线上
         fig_logit.add_trace(go.Scatter(
             x=df_final['Logit_Z'], 
             y=df_final['PD_Prob'], 
@@ -242,78 +245,70 @@ def main():
             text=df_final['Company Name'],
             textposition='top center',
             marker=dict(size=12, color=df_final['V18_Score'], colorscale='RdYlGn', showscale=True),
-            name='Companies'
+            name='公司分布'
         ))
         
         fig_logit.update_layout(
-            title="Logistic Mapping (Z-Score to PD)",
-            xaxis_title="Logit Z-Score (Higher = More Risk)",
-            yaxis_title="Probability of Default (PD)",
+            title="Logit 映射图 (横轴=综合得分Z, 纵轴=违约概率PD)",
+            xaxis_title="Logit Z-Score (越右风险越高)",
+            yaxis_title="违约概率 (PD)",
             template="plotly_dark",
-            height=400,
-            margin=dict(l=40, r=40, t=40, b=40)
+            height=400
         )
         st.plotly_chart(fig_logit, use_container_width=True)
-        st.caption("Mathematical Core: $PD = 1 / (1 + e^{-z})$, where $z = \\alpha + \\beta_1 X_1 + ... + Macro$")
 
     with t2:
-        st.markdown("#### SCENARIO IMPACT")
+        st.markdown("#### 情景冲击详情")
+        # 格式化表格显示
         st.dataframe(
             df_final[['Company Name', 'Rating', 'PD_Prob', 'Stressed_GM']]
-            .style.format({'PD_Prob': "{:.2%}", 'Stressed_GM': "{:.1f}%"})
-            .background_gradient(subset=['PD_Prob'], cmap='Reds'),
+            .rename(columns={'Company Name':'公司', 'Rating':'评级', 'PD_Prob':'违约率', 'Stressed_GM':'折后毛利'})
+            .style.format({'违约率': "{:.2%}", '折后毛利': "{:.1f}%"})
+            .background_gradient(subset=['违约率'], cmap='Reds'),
             use_container_width=True,
             height=400
         )
 
-    # --- PDF 生成模块 (含宏观与情景描述) ---
-    st.markdown("### 📑 AUDITED REPORTING")
+    # --- PDF 导出 (保留英文，防止字体报错) ---
+    st.markdown("### 📑 导出审计报告")
+    st.info("注：由于PDF引擎字体限制，导出报告暂时保持英文格式。")
     
     col_pdf_sel, col_pdf_btn = st.columns([3, 1])
-    target_comp = col_pdf_sel.selectbox("Select Issuer for Memo", df_final['Company Name'])
+    target_comp = col_pdf_sel.selectbox("选择要生成报告的公司", df_final['Company Name'])
     
-    if col_pdf_btn.button("GENERATE V18 REPORT"):
+    if col_pdf_btn.button("生成 PDF 报告"):
         row = df_final[df_final['Company Name'] == target_comp].iloc[0]
         
-        # --- PDF 生成逻辑 ---
         pdf = FPDF()
         pdf.add_page()
-        
-        # Header
         pdf.set_font("Arial", "B", 16)
-        pdf.cell(0, 10, f"CREDIT RISK MEMO: {target_comp}", 0, 1)
+        pdf.cell(0, 10, f"CREDIT MEMO: {target_comp}", 0, 1)
         pdf.set_font("Arial", "", 10)
-        pdf.cell(0, 10, f"Report ID: {str(uuid.uuid4())[:8].upper()} | Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
+        pdf.cell(0, 10, f"Generated by V18.0 System | {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
         pdf.line(10, 30, 200, 30)
-        
-        # Macro Section
         pdf.ln(10)
-        pdf.set_font("Arial", "B", 12)
-        pdf.cell(0, 10, "1. MACRO & SCENARIO CONTEXT", 0, 1)
-        pdf.set_font("Arial", "", 10)
-        pdf.multi_cell(0, 6, f"Cycle Status: {macro_status}\nScenario Applied: {selected_scenario_name}\nDescription: {scenario_params['desc']}")
         
-        # Financial Impact
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 10, "1. STRESS SCENARIO", 0, 1)
+        pdf.set_font("Arial", "", 10)
+        pdf.cell(0, 8, f"Scenario: {selected_scenario_name}", 0, 1)
+        
         pdf.ln(5)
         pdf.set_font("Arial", "B", 12)
-        pdf.cell(0, 10, "2. STRESS TEST RESULTS (LOGIT MODEL)", 0, 1)
-        pdf.set_font("Courier", "", 10)
+        pdf.cell(0, 10, "2. FINANCIAL IMPACT", 0, 1)
+        pdf.cell(0, 8, f"Final Score: {row['V18_Score']:.1f}", 0, 1)
+        pdf.cell(0, 8, f"Implied Rating: {row['Rating']}", 0, 1)
+        pdf.cell(0, 8, f"Prob. Default (PD): {row['PD_Prob']:.2%}", 0, 1)
         
-        pdf.cell(100, 8, f"Original Margin   : {row['Gross Margin']:.2f}%", 0, 1)
-        pdf.cell(100, 8, f"Stressed Margin   : {row['Stressed_GM']:.2f}%", 0, 1)
-        pdf.cell(100, 8, f"Logit Z-Score     : {row['Logit_Z']:.4f}", 0, 1)
-        pdf.cell(100, 8, f"Prob. of Default  : {row['PD_Prob']:.2%}", 0, 1)
-        pdf.cell(100, 8, f"Implied Rating    : {row['Rating']}", 0, 1)
-        
-        # Disclaimer
-        pdf.set_y(-30)
-        pdf.set_font("Arial", "I", 8)
-        pdf.multi_cell(0, 5, "Model Methodology: Logistic Regression based on expert-calibrated coefficients. PD represents 12-month forward-looking probability under stressed assumptions.")
-    # 强制转换为 bytes 类型，满足 Streamlit 的严格要求
+        # 强制转换为 bytes，修复下载报错
         pdf_bytes = bytes(pdf.output())
-        st.download_button("📥 DOWNLOAD PDF", pdf_bytes, "V18_FullStack_Report.pdf", "application/pdf")
+        
+        st.download_button(
+            "📥 下载报告 (PDF)", 
+            pdf_bytes, 
+            f"Report_{datetime.now().strftime('%Y%m%d')}.pdf", 
+            "application/pdf"
+        )
 
 if __name__ == "__main__":
     main()
-
-
