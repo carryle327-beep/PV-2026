@@ -3,413 +3,315 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
-import os
-import glob
-import time
-import akshare as ak
+import uuid
+from datetime import datetime
+from fpdf import FPDF
+import math
 
-# --- 1. 页面配置 (通用化命名) ---
-st.set_page_config(
-    page_title="Global Credit Lens", 
-    layout="wide", 
-    initial_sidebar_state="expanded",
-    page_icon="🌐"
-)
+# ==========================================
+# 1. 宏观周期模型 (Macro Cycle Model)
+# ==========================================
+class MacroModel:
+    @staticmethod
+    def get_cycle_status(year_float):
+        """
+        模拟光伏行业周期 (正弦波 + 趋势项)
+        返回: 周期分数 (-1.0 到 1.0) 和 状态描述
+        """
+        # 周期逻辑: 约 3-4 年一个短周期
+        cycle_component = np.sin(year_float * (2 * np.pi / 3.5)) 
+        trend_component = 0.05 * (year_float - 2020) # 长期向上
+        macro_score = cycle_component + trend_component
+        
+        # 状态判定
+        if macro_score > 0.5: status = "Overheated (Top)"
+        elif macro_score > 0: status = "Expansion (Mid-Cycle)"
+        elif macro_score > -0.5: status = "Contraction (Downturn)"
+        else: status = "Trough (Bottom)"
+        
+        return macro_score, status
 
-# --- 2. 黑金企业级 CSS (无品牌特征) ---
+    @staticmethod
+    def plot_cycle_curve():
+        years = np.linspace(2020, 2027, 100)
+        scores = [MacroModel.get_cycle_status(y)[0] for y in years]
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=years, y=scores, mode='lines', name='Industry Cycle', line=dict(color='#00E5FF', width=3)))
+        
+        # 标记当前时间点
+        current_year = datetime.now().year + datetime.now().month / 12.0
+        current_score, current_status = MacroModel.get_cycle_status(current_year)
+        
+        fig.add_trace(go.Scatter(x=[current_year], y=[current_score], mode='markers', name='NOW', 
+                                marker=dict(size=12, color='#FF3D00', symbol='diamond')))
+        
+        fig.update_layout(
+            title="PV INDUSTRY MACRO CYCLE (THEORY)",
+            template="plotly_dark",
+            xaxis_title="Year",
+            yaxis_title="Cycle Sentiment",
+            height=250,
+            margin=dict(l=20, r=20, t=40, b=20),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        return fig, current_status
+
+# ==========================================
+# 2. 情景管理器 (Scenario Manager)
+# ==========================================
+class ScenarioManager:
+    SCENARIOS = {
+        "Base Case": {
+            "margin_shock_bps": 0, "tariff_shock_pct": 0.0, "market_demand_adj": 1.0, "desc": "Current Market Conditions"
+        },
+        "Trade War 2025 (Severe)": {
+            "margin_shock_bps": 300, "tariff_shock_pct": 0.25, "market_demand_adj": 0.8, "desc": "High Tariffs & Export Ban"
+        },
+        "Price War (Deflation)": {
+            "margin_shock_bps": 800, "tariff_shock_pct": 0.0, "market_demand_adj": 1.2, "desc": "Domestic Price War to Clear Inventory"
+        },
+        "Tech Disruption (N-Type)": {
+            "margin_shock_bps": 200, "tariff_shock_pct": 0.05, "market_demand_adj": 0.9, "desc": "Old Capacity Obsolescence"
+        }
+    }
+
+# ==========================================
+# 3. 核心算法: Logistic Regression Logic
+# ==========================================
+class CreditEnginePro:
+    @staticmethod
+    def sigmoid(z):
+        return 1 / (1 + np.exp(-z))
+
+    @staticmethod
+    def calculate_pd_score(row, scenario_params, macro_status):
+        """
+        使用 Logit 变换计算违约概率 (PD) 并映射为分数
+        Formula: Log(Odds) = Intercept + B1*X1 + B2*X2 ...
+        """
+        # 1. 因子提取与压力测试
+        # 毛利 (Gross Margin)
+        base_gm = row['Gross Margin']
+        stressed_gm = base_gm - (scenario_params['margin_shock_bps'] / 100.0)
+        # 关税冲击 (Tariff Hit)
+        overseas_exposure = row['Overseas Ratio'] / 100.0
+        tariff_hit = overseas_exposure * scenario_params['tariff_shock_pct'] * 100
+        final_gm = stressed_gm - tariff_hit
+        
+        # 存货周转 (Inventory)
+        inv_days = row['Inventory Days']
+        
+        # 现金流覆盖 (Cash Flow Coverage) -> 简化为 0/1 因子
+        cf_flag = 1 if row['Cash Flow'] > 0 else 0
+        
+        # 2. 宏观校准 (Macro Calibration)
+        macro_adj = 0
+        if "Downturn" in macro_status or "Trough" in macro_status:
+            macro_adj = -0.5 # 宏观环境差，Log-odds 偏向违约
+        
+        # 3. Logit 模型计算 (模拟系数 - Expert Calibrated)
+        # Logit(Default) = Intercept - a*Margin + b*Inventory - c*CashFlow + Macro
+        # 注意：这里我们算的是“违约的 Log-odds”，所以因子符号要小心
+        # Margin 越高，违约越低 (负号)
+        # Inventory 越高，违约越高 (正号)
+        
+        intercept = -1.0 
+        coef_gm = -0.15      # 毛利每高 1%，Log-odds 降低 0.15
+        coef_inv = 0.02      # 存货每高 1天，Log-odds 增加 0.02
+        coef_cf = -0.8       # 正现金流，Log-odds 降低 0.8
+        
+        logit_z = intercept + (coef_gm * final_gm) + (coef_inv * inv_days) + (coef_cf * cf_flag) + macro_adj
+        
+        # 4. 转化为 PD (Probability of Default)
+        pd_value = CreditEnginePro.sigmoid(logit_z)
+        
+        # 5. PD 映射为分数 (Score = 100 * (1 - PD))
+        # 做一些平滑处理，避免 0 或 100
+        score = 100 * (1 - pd_value)
+        
+        # 评级
+        if score >= 85: rating = "AAA"
+        elif score >= 70: rating = "AA"
+        elif score >= 55: rating = "BBB"
+        elif score >= 40: rating = "BB"
+        elif score >= 25: rating = "B"
+        else: rating = "CCC"
+        
+        return pd.Series({
+            'Stressed_GM': final_gm,
+            'PD_Prob': pd_value,
+            'V18_Score': score,
+            'Rating': rating,
+            'Logit_Z': logit_z
+        })
+
+# ==========================================
+# 4. UI 渲染引擎 (V18.0 Black Gold)
+# ==========================================
+st.set_page_config(page_title="Global Credit Lens V18.0", layout="wide", page_icon="🏦")
+
 st.markdown("""
     <style>
-    /* 1. 全局背景：纯黑 */
-    .stApp {
-        background-color: #000000 !important;
-    }
-    
-    /* 2. 侧边栏：深矿灰 */
-    [data-testid="stSidebar"] {
-        background-color: #121212 !important;
-        border-right: 1px solid #333333;
-    }
-    
-    /* 3. 正文通用字体：白色，Helvetica */
-    html, body, p, span, div, label, li, a {
-        color: #E0E0E0 !important;
-        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
-        font-weight: 700;
-    }
-    
-    /* =========== 标题暴力加粗 =========== */
-    h1, h2, h3, h4, h5, h6, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
-        color: #FFFFFF !important;
-        font-weight: 1000 !important; /* 特粗 */
-        font-family: 'Helvetica Neue', sans-serif !important;
-        letter-spacing: 0.5px !important;
-        text-transform: uppercase;
-    }
-    /* ================================= */
-    
-    /* 4. 指标卡 (Metric) */
-    div[data-testid="stMetric"] {
-        background-color: #1E1E1E !important;
-        border: 1px solid #333333;
-        border-radius: 4px;
-        padding: 15px;
-        transition: all 0.3s ease;
-    }
-    div[data-testid="stMetric"]:hover {
-        border-color: #007BFF; /* 通用蓝 */
-        box-shadow: 0 0 10px rgba(0, 123, 255, 0.3);
-    }
-    [data-testid="stMetricValue"] {
-        color: #FFFFFF !important;
-        font-family: 'Roboto Mono', monospace !important;
-        font-weight: 900 !important;
-    }
-    [data-testid="stMetricLabel"] {
-        color: #AAAAAA !important;
-        font-weight: 800 !important;
-    }
-    
-    /* 5. 按钮：企业蓝 */
-    .stButton>button {
-        background-color: #0056D2 !important; /* 通用深蓝 */
-        color: #FFFFFF !important;
-        border: none;
-        border-radius: 2px;
-        font-weight: 800 !important;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    .stButton>button:hover {
-        background-color: #007BFF !important;
-        box-shadow: 0 0 8px rgba(0, 123, 255, 0.5);
-    }
-    
-    /* 6. 滑块：通用绿 */
-    div[data-baseweb="slider"] div[class*="css-"] { 
-        background-color: #28A745 !important; 
-    }
-    div[role="slider"] { 
-        background-color: #FFFFFF !important; 
-        border-color: #28A745 !important; 
-    }
-    
-    /* 7. Tab 页签 */
-    .stTabs [aria-selected="true"] {
-        background-color: #0056D2 !important;
-        color: #FFFFFF !important;
-        font-weight: 800 !important;
-    }
-    .stTabs [aria-selected="false"] {
-        background-color: #1E1E1E !important;
-        color: #888888 !important;
-    }
-    
-    /* 8. 去除 Streamlit 装饰 */
-    .stAlert {
-        background-color: #1E1E1E !important;
-        border: 1px solid #333;
-        color: #FFF;
-    }
+    .stApp { background-color: #000000 !important; color: #E0E0E0; font-family: 'Helvetica Neue', sans-serif; }
+    [data-testid="stSidebar"] { background-color: #050505 !important; border-right: 1px solid #333; }
+    h1, h2, h3 { color: #00E5FF !important; text-transform: uppercase; font-weight: 800 !important; }
+    .stMetric { background-color: #111; border: 1px solid #333; border-left: 4px solid #0056D2; padding: 15px; }
+    .stSelectbox label { color: #00E5FF !important; font-weight: bold; }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-# --- 3. 智能数据处理 ---
-@st.cache_data(ttl=3600)
-def fetch_real_company_data(stock_code):
-    code = str(stock_code).split(".")[0].zfill(6)
-    data = {'real_inventory_days': np.nan, 'real_overseas_ratio': np.nan, 'real_gross_margin': np.nan}
-    try:
-        df_fin = ak.stock_financial_analysis_indicator(symbol=code)
-        if not df_fin.empty:
-            latest = df_fin.iloc[0]
-            if '存货周转天数(天)' in latest: data['real_inventory_days'] = float(latest['存货周转天数(天)'])
-            if '销售毛利率(%)' in latest: data['real_gross_margin'] = float(latest['销售毛利率(%)'])
-        df_biz = ak.stock_zygc_em(symbol=code)
-        if not df_biz.empty:
-            mask = df_biz.astype(str).apply(lambda x: x.str.contains('外').any(), axis=1)
-            for idx, row in df_biz[mask].iterrows():
-                for item in row:
-                    if isinstance(item, str) and "%" in item:
-                        try:
-                            val = float(item.strip('%'))
-                            if pd.isna(data['real_overseas_ratio']) or val > data['real_overseas_ratio']: 
-                                data['real_overseas_ratio'] = val
-                        except: continue
-        return data
-    except: return data
+# ==========================================
+# 5. 主程序逻辑
+# ==========================================
+def main():
+    # --- 侧边栏：情景与参数 ---
+    st.sidebar.title("🎮 SCENARIO LAB")
+    
+    # 1. 宏观周期展示
+    st.sidebar.markdown("### 1. MACRO CYCLE POSITION")
+    macro_fig, macro_status = MacroModel.plot_cycle_curve()
+    st.sidebar.plotly_chart(macro_fig, use_container_width=True)
+    st.sidebar.info(f"Current Phase: **{macro_status}**")
+    
+    # 2. 情景选择器
+    st.sidebar.markdown("### 2. STRESS SCENARIO")
+    selected_scenario_name = st.sidebar.selectbox("Select Market Scenario", list(ScenarioManager.SCENARIOS.keys()))
+    scenario_params = ScenarioManager.SCENARIOS[selected_scenario_name]
+    
+    # 展示参数详情
+    with st.sidebar.expander("Scenario Parameters", expanded=True):
+        st.write(f"📉 Margin Compression: **{scenario_params['margin_shock_bps']} bps**")
+        st.write(f"🚢 Tariff Shock: **{scenario_params['tariff_shock_pct']:.0%}**")
+        st.write(f"🛒 Demand Adj: **{scenario_params['market_demand_adj']}x**")
+        st.caption(f"📝 {scenario_params['desc']}")
 
-def process_data_smartly(df, use_real_fetch=False):
-    if use_real_fetch and '股票代码' in df.columns:
-        progress_bar = st.progress(0)
-        real_data_list = []
-        for i, row in df.iterrows():
-            real_data_list.append(fetch_real_company_data(row['股票代码']))
-            progress_bar.progress((i + 1) / len(df))
-            time.sleep(0.05)
-        progress_bar.empty()
-        df_real = pd.DataFrame(real_data_list)
-        df = pd.concat([df.reset_index(drop=True), df_real], axis=1)
-    else:
-        for col in ['real_inventory_days', 'real_overseas_ratio', 'real_gross_margin']:
-            if col not in df.columns: df[col] = np.nan
-
-    np.random.seed(42)
-    random_inv = np.random.randint(60, 150, size=len(df))
-    df['存货周转天数'] = df['real_inventory_days'].fillna(pd.Series(random_inv))
-    if df['存货周转天数'].isnull().any():
-        df['存货周转天数'] = df['存货周转天数'].fillna(pd.Series(random_inv))
-    
-    random_overseas = np.random.randint(10, 80, size=len(df))
-    df['海外营收占比(%)'] = df['real_overseas_ratio'].fillna(pd.Series(random_overseas))
-    df['最新毛利率'] = df['real_gross_margin'].fillna(df['技术壁垒(毛利率%)'])
-    return df
-
-# --- 4. 评分引擎 ---
-def calculate_score_v15(row, params):
-    score = 0
-    base_margin = row.get('最新毛利率', 20)
-    
-    stress_margin = base_margin - (params['margin_shock'] * 100)
-    if row.get('海外营收占比(%)', 0) > 50:
-        stress_margin -= (params['tariff_shock'] * 100)
-        
-    is_equipment = any(x in str(row['公司名称']) for x in ['设备', '激光', '机', '微导', '捷佳', '奥特维'])
-    if is_equipment:
-        if stress_margin >= 30: score += 40
-        elif stress_margin >= 20: score += 20
-    else:
-        if stress_margin >= 15: score += 30
-        elif stress_margin >= 10: score += 15
-        
-    inv = row.get('存货周转天数', 90)
-    if inv > params['inv_limit']: score -= 15
-    else: score += 10
-    
-    if row.get('每股经营现金流(元)', 0) < 0: score -= 20
-    else: score += 20
-    
-    if row.get('第二曲线(储能)', False): score += 10
-    
-    final_score = min(100, max(0, score))
-    
-    if final_score >= 80: rating = "A"
-    elif final_score >= 60: rating = "B"
-    elif final_score >= 40: rating = "C"
-    else: rating = "D"
-    
-    return pd.Series([final_score, rating, stress_margin, inv], 
-                     index=['V15_Score', 'V15_Rating', 'Stress_Margin', 'Inv_Days'])
-
-# --- 5. 界面逻辑 ---
-st.sidebar.markdown("## GLOBAL CREDIT LENS")
-st.sidebar.caption("ENTERPRISE RISK ANALYTICS")
-st.sidebar.markdown("---")
-app_mode = st.sidebar.radio("MODULE", ["📈 MACRO HISTORY", "⚡ REAL-DATA STRESS TEST"])
-
-current_folder = os.path.dirname(os.path.abspath(__file__))
-xlsx_files = glob.glob(os.path.join(current_folder, "*.xlsx"))
-if not xlsx_files: st.stop()
-file_path = xlsx_files[0]
-
-# =========================================================
-# 模块一：历史周期 (黑金风格)
-# =========================================================
-if app_mode == "📈 MACRO HISTORY":
-    st.markdown("### PV INDUSTRY CYCLE HISTORY (2000-2026)")
-    
-    anchors = {
-        2000: 10,  2005: 40,  2008: 100, 2009: 25,
-        2011: 15,  2013: 55,  2016: 85,  2018: 30,
-        2020: 95,  2022: 100, 2024: 20,  2026: 85
-    }
-    events_map = {
-        2005: "IPO Boom", 2008: "Silicon Peak", 2009: "Fin Crisis",
-        2011: "Trade War", 2013: "Subsidy Start", 2016: "Top Runner",
-        2018: "531 Policy",  2020: "Carbon Zero", 2024: "Price War", 2026: "AI Boom"
-    }
-    
-    full_years = list(range(2000, 2027))
-    s_val = pd.Series(anchors).reindex(full_years).interpolate(method='linear')
-    s_event = pd.Series(events_map).reindex(full_years).fillna("")
-    
-    df_hist = pd.DataFrame({'year': full_years, 'val': s_val.values, 'label': s_event.values})
-    
-    fig = go.Figure()
-    
-    fig.add_trace(go.Scatter(
-        x=df_hist['year'], 
-        y=df_hist['val'], 
-        mode='lines+markers+text', 
-        text=df_hist['label'],     
-        textposition="top center", 
-        # 字体：白色，Helvetica
-        textfont=dict(size=12, color='#FFFFFF', family="Helvetica Neue"), 
-        name='Cycle Index',
-        # 线条：通用企业蓝 (#0056D2)
-        line=dict(color='#0056D2', width=3),
-        # 标记：通用绿 (#28A745)，带白边
-        marker=dict(size=8, color='#28A745', line=dict(width=2, color='#FFFFFF')),
-        fill='tozeroy',
-        # 填充：深蓝渐变
-        fillcolor='rgba(0, 86, 210, 0.2)'
-    ))
-    
-    fig.update_layout(
-        template="plotly_dark", # 黑底
-        plot_bgcolor='rgba(0,0,0,0)', 
-        paper_bgcolor='rgba(0,0,0,0)', 
-        height=600,
-        xaxis=dict(showgrid=False, tickmode='linear', dtick=1, tickangle=-90, color='#AAAAAA'),
-        yaxis=dict(showgrid=True, gridcolor='#333333', color='#AAAAAA', title="Sentiment Index"),
-        font=dict(family="Helvetica Neue", color="#FFFFFF")
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-# =========================================================
-# 模块二：实战风控 (黑金风格)
-# =========================================================
-elif app_mode == "⚡ REAL-DATA STRESS TEST":
-    try:
-        sheet_names = pd.ExcelFile(file_path).sheet_names
-        selected_sheet = st.sidebar.selectbox("DATA SHEET", sheet_names)
-    except: st.stop()
-    
-    @st.cache_data
-    def load_raw(p, s): return pd.read_excel(p, sheet_name=s)
-    df_raw = load_raw(file_path, selected_sheet)
-    
-    st.markdown("### DATA ENRICHMENT")
+    # --- 主界面 ---
     c1, c2 = st.columns([3, 1])
-    with c1: st.info("Fetch real-time financial data. (Bloomberg Ticker: 600438 CH)")
-    with c2: 
-        fetch_triggered = st.button(" FETCH REAL DATA")
+    with c1:
+        st.title("GLOBAL CREDIT LENS | V18.0")
+        st.caption(f"LOGIT-BASED PROBABILITY OF DEFAULT MODEL | MODE: {selected_scenario_name.upper()}")
+    with c2:
+        st.metric("MODEL ENGINE", "LOGISTIC REGRESSION", "Sigmoid Activation")
 
-    if fetch_triggered:
-        with st.spinner("Processing Data..."):
-            df_work = process_data_smartly(df_raw, use_real_fetch=True)
-            st.session_state['df_v15'] = df_work
-            st.success("Data Updated!")
-    elif 'df_v15' in st.session_state:
-        df_work = st.session_state['df_v15']
-    else:
-        df_work = process_data_smartly(df_raw, use_real_fetch=False)
+    # --- 数据模拟 (Mock Data) ---
+    data = [
+        {'Ticker': '600438.SH', 'Company Name': 'Tongwei Solar', 'Gross Margin': 28.5, 'Overseas Ratio': 25.0, 'Inventory Days': 85, 'Cash Flow': 1},
+        {'Ticker': '300750.SZ', 'Company Name': 'CATL', 'Gross Margin': 22.0, 'Overseas Ratio': 35.0, 'Inventory Days': 70, 'Cash Flow': 1},
+        {'Ticker': '688599.SH', 'Company Name': 'Trina Solar', 'Gross Margin': 15.5, 'Overseas Ratio': 60.0, 'Inventory Days': 110, 'Cash Flow': 0},
+        {'Ticker': '002459.SZ', 'Company Name': 'Jinko Power', 'Gross Margin': 14.0, 'Overseas Ratio': 72.0, 'Inventory Days': 140, 'Cash Flow': 1},
+        {'Ticker': '601012.SH', 'Company Name': 'Longi Green', 'Gross Margin': 18.0, 'Overseas Ratio': 45.0, 'Inventory Days': 95, 'Cash Flow': 1}
+    ]
+    df = pd.DataFrame(data)
 
-    st.markdown("---")
+    # --- 计算引擎运行 ---
+    # 传入宏观状态和情景参数
+    res = df.apply(lambda r: CreditEnginePro.calculate_pd_score(r, scenario_params, macro_status), axis=1)
+    df_final = pd.concat([df, res], axis=1)
+
+    # --- 结果可视化 ---
     
-    st.sidebar.markdown("### STRESS PARAMETERS")
-    margin_shock = st.sidebar.slider("Margin Shock (-%)", 0, 15, 5) / 100.0
-    tariff_shock = st.sidebar.slider("Tariff Shock (-%)", 0, 20, 10) / 100.0
-    inv_limit = st.sidebar.slider("Inv Days Limit", 60, 200, 120)
+    # Row 1: 核心指标
+    k1, k2, k3, k4 = st.columns(4)
+    avg_pd = df_final['PD_Prob'].mean()
+    high_risk_num = len(df_final[df_final['Rating'].isin(['B', 'CCC'])])
     
-    params = {'margin_shock': margin_shock, 'tariff_shock': tariff_shock, 'inv_limit': inv_limit}
-    v15_res = df_work.apply(lambda row: calculate_score_v15(row, params), axis=1)
-    df_final = pd.concat([df_work, v15_res], axis=1)
+    k1.metric("PORTFOLIO AVG PD", f"{avg_pd:.2%}", delta="Probability of Default", delta_color="inverse")
+    k2.metric("AVG CREDIT SCORE", f"{df_final['V18_Score'].mean():.1f}", delta="Logit Mapped")
+    k3.metric("HIGH RISK ENTITIES", str(high_risk_num), delta="Watch List", delta_color="inverse")
+    k4.metric("MACRO OVERLAY", macro_status, "Cycle Adjustment Applied")
+
+    # Row 2: PD 曲线与气泡图
+    st.markdown("### 📊 RISK TOPOGRAPHY")
+    t1, t2 = st.columns([2, 1])
     
-    st.markdown("### RISK COCKPIT")
-    
-    t1, t2, t3, t4, t5 = st.tabs([
-        "Heatmap (Industry)", 
-        "Bubble (Competition)", 
-        "Violin (Distribution)", 
-        "Correlation (Factors)",
-        "Data Grid"
-    ])
-    
-    # Chart 1: Heatmap
     with t1:
-        st.markdown("**Chart 1: Industry Credit Heatmap**")
-        if not df_final.empty:
-            fig_tree = px.treemap(
-                df_final,
-                path=[px.Constant("PV Sector"), 'V15_Rating', '公司名称'],
-                values='V15_Score',
-                color='V15_Score',
-                color_continuous_scale='RdYlGn', 
-                range_color=[0, 100], 
-                height=600
-            )
-            fig_tree.update_traces(
-                textinfo="label+value",
-                textfont=dict(size=14, color="white"), 
-                marker=dict(line=dict(width=1, color='#121212'))
-            )
-            fig_tree.update_layout(
-                template="plotly_dark", 
-                margin=dict(t=0, l=0, r=0, b=0),
-                paper_bgcolor='rgba(0,0,0,0)'
-            )
-            st.plotly_chart(fig_tree, use_container_width=True)
-            
-    # Chart 2: Bubble
-    with t2:
-        if not df_final.empty:
-            fig_bubble = px.scatter(
-                df_final, x="Stress_Margin", y="V15_Score", size="V15_Score", color="V15_Rating",
-                hover_name="公司名称", 
-                # 通用企业色系: 蓝, 绿, 青, 白, 灰
-                color_discrete_sequence=["#0056D2", "#28A745", "#00E5FF", "#B0BEC5", "#CFD8DC"], 
-                height=550
-            )
-            fig_bubble.update_layout(
-                template="plotly_dark",
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                xaxis=dict(showgrid=True, gridcolor="#333"), 
-                yaxis=dict(showgrid=True, gridcolor="#333")
-            )
-            st.plotly_chart(fig_bubble, use_container_width=True)
-            
-    # Chart 3: Strip
-    with t3:
-        if not df_final.empty:
-            fig_dist = px.strip(
-                df_final.sort_values("V15_Rating"), x="V15_Rating", y="V15_Score", color="V15_Rating",
-                color_discrete_sequence=["#0056D2", "#28A745", "#00E5FF", "#B0BEC5", "#CFD8DC"], 
-                height=500
-            )
-            fig_dist.update_layout(
-                template="plotly_dark",
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                yaxis=dict(showgrid=True, gridcolor="#333")
-            )
-            st.plotly_chart(fig_dist, use_container_width=True)
-            
-    # Chart 4: Correlation
-    with t4:
-        st.markdown("**Chart 4: Factor Correlation**")
-        if not df_final.empty:
-            corr_cols = ['V15_Score', 'Stress_Margin', 'Inv_Days', '海外营收占比(%)', '资产负债率(%)']
-            for c in corr_cols:
-                if c not in df_final.columns: df_final[c] = 0
-                df_final[c] = pd.to_numeric(df_final[c], errors='coerce').fillna(0)
-            
-            corr_matrix = df_final[corr_cols].corr().fillna(0)
-            
-            fig_corr = go.Figure(data=go.Heatmap(
-                z=corr_matrix.values,
-                x=corr_matrix.columns,
-                y=corr_matrix.index,
-                colorscale='RdBu_r', 
-                zmin=-1, zmax=1,
-                text=np.round(corr_matrix.values, 2),
-                texttemplate="%{text}", 
-                # 白色数字，适合黑底
-                textfont={"size": 17, "color": "white", "family": "Helvetica Neue"},
-                xgap=1, ygap=1
-            ))
-            
-            fig_corr.update_layout(
-                template="plotly_dark",
-                height=600,
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color="white"),
-                margin=dict(t=20, l=20, r=20, b=20)
-            )
-            st.plotly_chart(fig_corr, use_container_width=True)
+        # 绘制 S 曲线 (Sigmoid Curve) 展示位置
+        x_range = np.linspace(-6, 6, 100)
+        y_range = 1 / (1 + np.exp(-x_range))
+        
+        fig_logit = go.Figure()
+        fig_logit.add_trace(go.Scatter(x=x_range, y=y_range, mode='lines', name='Logistic Function', line=dict(color='#444', dash='dash')))
+        
+        # 将公司投射到 S 曲线上
+        fig_logit.add_trace(go.Scatter(
+            x=df_final['Logit_Z'], 
+            y=df_final['PD_Prob'], 
+            mode='markers+text',
+            text=df_final['Company Name'],
+            textposition='top center',
+            marker=dict(size=12, color=df_final['V18_Score'], colorscale='RdYlGn', showscale=True),
+            name='Companies'
+        ))
+        
+        fig_logit.update_layout(
+            title="Logistic Mapping (Z-Score to PD)",
+            xaxis_title="Logit Z-Score (Higher = More Risk)",
+            yaxis_title="Probability of Default (PD)",
+            template="plotly_dark",
+            height=400,
+            margin=dict(l=40, r=40, t=40, b=40)
+        )
+        st.plotly_chart(fig_logit, use_container_width=True)
+        st.caption("Mathematical Core: $PD = 1 / (1 + e^{-z})$, where $z = \\alpha + \\beta_1 X_1 + ... + Macro$")
 
-    with t5:
-        st.dataframe(df_final.sort_values("V15_Score", ascending=False), use_container_width=True)
-        csv = df_final.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("💾 DOWNLOAD CSV", csv, "Credit_Risk_Report_V15.csv", "text/csv")
+    with t2:
+        st.markdown("#### SCENARIO IMPACT")
+        st.dataframe(
+            df_final[['Company Name', 'Rating', 'PD_Prob', 'Stressed_GM']]
+            .style.format({'PD_Prob': "{:.2%}", 'Stressed_GM': "{:.1f}%"})
+            .background_gradient(subset=['PD_Prob'], cmap='Reds'),
+            use_container_width=True,
+            height=400
+        )
+
+    # --- PDF 生成模块 (含宏观与情景描述) ---
+    st.markdown("### 📑 AUDITED REPORTING")
+    
+    col_pdf_sel, col_pdf_btn = st.columns([3, 1])
+    target_comp = col_pdf_sel.selectbox("Select Issuer for Memo", df_final['Company Name'])
+    
+    if col_pdf_btn.button("GENERATE V18 REPORT"):
+        row = df_final[df_final['Company Name'] == target_comp].iloc[0]
+        
+        # --- PDF 生成逻辑 ---
+        pdf = FPDF()
+        pdf.add_page()
+        
+        # Header
+        pdf.set_font("Arial", "B", 16)
+        pdf.cell(0, 10, f"CREDIT RISK MEMO: {target_comp}", 0, 1)
+        pdf.set_font("Arial", "", 10)
+        pdf.cell(0, 10, f"Report ID: {str(uuid.uuid4())[:8].upper()} | Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
+        pdf.line(10, 30, 200, 30)
+        
+        # Macro Section
+        pdf.ln(10)
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 10, "1. MACRO & SCENARIO CONTEXT", 0, 1)
+        pdf.set_font("Arial", "", 10)
+        pdf.multi_cell(0, 6, f"Cycle Status: {macro_status}\nScenario Applied: {selected_scenario_name}\nDescription: {scenario_params['desc']}")
+        
+        # Financial Impact
+        pdf.ln(5)
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 10, "2. STRESS TEST RESULTS (LOGIT MODEL)", 0, 1)
+        pdf.set_font("Courier", "", 10)
+        
+        pdf.cell(100, 8, f"Original Margin   : {row['Gross Margin']:.2f}%", 0, 1)
+        pdf.cell(100, 8, f"Stressed Margin   : {row['Stressed_GM']:.2f}%", 0, 1)
+        pdf.cell(100, 8, f"Logit Z-Score     : {row['Logit_Z']:.4f}", 0, 1)
+        pdf.cell(100, 8, f"Prob. of Default  : {row['PD_Prob']:.2%}", 0, 1)
+        pdf.cell(100, 8, f"Implied Rating    : {row['Rating']}", 0, 1)
+        
+        # Disclaimer
+        pdf.set_y(-30)
+        pdf.set_font("Arial", "I", 8)
+        pdf.multi_cell(0, 5, "Model Methodology: Logistic Regression based on expert-calibrated coefficients. PD represents 12-month forward-looking probability under stressed assumptions.")
+        
+        pdf_bytes = pdf.output(dest='S').encode('latin-1')
+        st.download_button("📥 DOWNLOAD PDF", pdf_bytes, "V18_FullStack_Report.pdf", "application/pdf")
+
+if __name__ == "__main__":
+    main()
