@@ -9,10 +9,12 @@ from fpdf import FPDF
 import io
 
 # ==========================================
-# 0. 系统配置 (V24.1 终极版)
+# 0. 系统配置 (V24.2 修复版)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V24.1", layout="wide", page_icon="🏦")
-st.set_option('deprecation.showPyplotGlobalUse', False)
+st.set_page_config(page_title="Global Credit Lens V24.2", layout="wide", page_icon="🏦")
+
+# [修复]：删除了报错的 set_option('deprecation.showPyplotGlobalUse', False)
+# 因为代码里主要用 Plotly，这行旧配置已不再需要。
 
 # CSS 样式
 st.markdown("""
@@ -86,26 +88,25 @@ class CreditEngine:
         except:
             return pd.Series({'Score': 0, 'Rating': 'Error', 'PD_Prob': 1.0, 'Stressed_GM': 0})
 
-        # --- 五维压力传导逻辑 (5-Factor Logic) ---
+        # --- 五维压力传导逻辑 ---
         
         # 1. 行业内卷 (Margin Shock)
         market_hit = params['margin_shock'] / 100.0
         
-        # 2. 关税冲击 (Tariff Shock) -> 影响海外部分
+        # 2. 关税冲击 (Tariff Shock)
         tariff_hit = (overseas / 100.0) * params['tariff_shock'] * 100
         
-        # 3. 原材料通胀 (Input Cost) -> 传导系数 0.2
+        # 3. 原材料通胀 (Input Cost)
         input_cost_hit = params['raw_material_shock'] * 0.2
         
-        # 4. 汇率冲击 (FX Shock) -> 影响海外部分 (新增!)
-        # 假设人民币升值/美元贬值，海外收入换回国内会变少
+        # 4. 汇率冲击 (FX Shock)
         fx_hit = (overseas / 100.0) * params['fx_shock'] 
 
         # 计算折后毛利
         final_gm = base_gm - market_hit - tariff_hit - input_cost_hit - fx_hit
-        final_gm = max(final_gm, -10.0) # 允许亏损更多
+        final_gm = max(final_gm, -10.0)
 
-        # 5. 加息冲击 (Rate Hike) -> 惩罚高负债
+        # 5. 加息冲击 (Rate Hike)
         rate_hit = (debt_ratio / 100.0) * (params['rate_hike_bps'] / 100.0) * 5.0
 
         # --- Logit 模型 ---
@@ -153,29 +154,24 @@ def main():
             {'Ticker': '300750', 'Company': '宁德时代', 'Gross Margin': 22.0, 'Overseas Ratio': 35.0, 'Inventory Days': 70, 'Debt Ratio': 45.0, 'Cash Flow': 1}
         ])
 
-    # --- B. 五维压力参数 (真正集齐 5 个) ---
+    # --- B. 五维压力参数 (5 Factors) ---
     st.sidebar.markdown("---")
     st.sidebar.subheader("2. 宏观压力参数 (5 Factors)")
     
-    # 1. 市场
     st.sidebar.caption("📉 市场环境")
     margin_shock = st.sidebar.slider("1. 行业内卷 (bps)", 0, 1000, 300)
     
-    # 2. 贸易
     st.sidebar.caption("🚢 地缘政治")
     tariff_shock = st.sidebar.slider("2. 关税壁垒 (%)", 0.0, 1.0, 0.25)
     
-    # 3. 资金
     st.sidebar.caption("💰 资金成本")
     rate_hike = st.sidebar.slider("3. 美联储加息 (bps)", 0, 500, 100)
     
-    # 4. 供应链
     st.sidebar.caption("🧱 供应链")
     raw_mat_shock = st.sidebar.slider("4. 原材料通胀 (%)", 0, 50, 10)
     
-    # 5. 汇率 (新增!)
-    st.sidebar.caption("💱 汇率风险 (New)")
-    fx_shock = st.sidebar.slider("5. 汇率波动损失 (%)", 0, 20, 5, help="非美货币贬值导致的汇兑损失")
+    st.sidebar.caption("💱 汇率风险")
+    fx_shock = st.sidebar.slider("5. 汇率波动损失 (%)", 0, 20, 5)
     
     params = {
         'margin_shock': margin_shock, 
@@ -193,8 +189,8 @@ def main():
     except: return
 
     # --- 界面 ---
-    st.title("GLOBAL CREDIT LENS | V24.1")
-    st.caption(f"模型状态: 五维全量压力测试 (5-Factor Stress Model)")
+    st.title("GLOBAL CREDIT LENS | V24.2")
+    st.caption(f"模型状态: 五维全量压力测试 (5-Factor Stress Model) | 修复版")
     
     # 搜索
     search_list = df_final['Search_Label'].tolist()
@@ -246,11 +242,11 @@ def main():
                 pdf.cell(0, 8, f"2. Tariff Shock: -{params['tariff_shock']*100:.0f}%", 0, 1)
                 pdf.cell(0, 8, f"3. Rate Hike: +{params['rate_hike_bps']} bps", 0, 1)
                 pdf.cell(0, 8, f"4. Input Cost: +{params['raw_material_shock']}%", 0, 1)
-                pdf.cell(0, 8, f"5. FX Shock: -{params['fx_shock']}% (New)", 0, 1) # 新增
+                pdf.cell(0, 8, f"5. FX Shock: -{params['fx_shock']}%", 0, 1)
                 
                 pdf.ln(10)
                 pdf.set_font("Arial", "I", 10)
-                pdf.cell(0, 10, "Note: Automated by Global Credit Lens V24.1", 0, 1)
+                pdf.cell(0, 10, "Note: Automated by Global Credit Lens V24.2", 0, 1)
                 
                 pdf_bytes = bytes(pdf.output())
                 st.download_button("📥 下载 PDF", pdf_bytes, f"Report_{row['Ticker']}.pdf", "application/pdf")
