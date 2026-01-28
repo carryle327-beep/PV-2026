@@ -9,9 +9,9 @@ from fpdf import FPDF
 import io
 
 # ==========================================
-# 0. 系统配置 (旗舰版黑白风)
+# 0. 系统配置 (旗舰版黑白风 - V22 UI)
 # ==========================================
-st.set_page_config(page_title="全球信贷透视系统 V22 (旗舰版)", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="全球信贷透视系统 V22.1 (旗舰版)", layout="wide", page_icon="🏦")
 
 st.markdown("""
     <style>
@@ -130,7 +130,7 @@ def main():
     # ==========================================
     # 界面第一部分：单体穿透 (Micro View)
     # ==========================================
-    st.title("GLOBAL CREDIT LENS | V22.0")
+    st.title("GLOBAL CREDIT LENS | V22.1")
     st.caption(f"当前分析样本: {len(df_final)} 家 | 模式: 压力测试 (Stress Testing)")
     
     # 搜索条
@@ -160,24 +160,47 @@ def main():
         """, unsafe_allow_html=True)
         
         st.write("")
-        # PDF 导出 (保留无中文的稳定版)
-        if st.button(f"📄 导出 {row['Ticker']} 英文报告"):
+        
+        # --- 满血复活的 PDF 导出功能 (V21 内核) ---
+        if st.button(f"📄 导出 {row['Ticker']} 完整审计报告"):
             try:
                 pdf = FPDF()
                 pdf.add_page()
+                
+                # 1. 标题回归专业风 (CREDIT MEMO)
                 pdf.set_font("Arial", "B", 24)
-                pdf.cell(0, 20, f"CREDIT REPORT: {row['Ticker']}", 0, 1, 'C')
+                pdf.cell(0, 20, f"CREDIT MEMO: {row['Ticker']}", 0, 1, 'C')
                 pdf.line(10, 30, 200, 30)
                 pdf.ln(10)
+                
+                # 2. 核心数据 (找回 PD)
                 pdf.set_font("Arial", "", 12)
-                pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
-                pdf.cell(0, 10, f"Rating: {str(row['Rating']).split(' ')[0]}", 0, 1)
-                pdf.cell(0, 10, f"Score: {row['Score']:.1f}", 0, 1)
-                pdf.cell(0, 10, f"Stress Scenario: Margin -{margin_shock}bps", 0, 1)
+                pdf.cell(0, 10, f"Report Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
+                pdf.cell(0, 10, f"Internal Rating: {str(row['Rating']).split(' ')[0]}", 0, 1)
+                pdf.cell(0, 10, f"Credit Score: {row['Score']:.1f} / 100", 0, 1)
+                
+                # 加粗显示违约概率 (PD)
+                pdf.set_font("Arial", "B", 12) 
+                pdf.cell(0, 10, f"Probability of Default (PD): {row['PD_Prob']:.2%}", 0, 1) 
+                
+                pdf.ln(10)
+                
+                # 3. 压力参数详情 (找回关税 Tariff)
+                pdf.set_font("Arial", "B", 12)
+                pdf.cell(0, 10, "STRESS TEST SCENARIO:", 0, 1)
+                pdf.set_font("Arial", "", 11)
+                pdf.cell(0, 8, f"- Margin Shock: -{params['margin_shock']} bps (Profit Impact)", 0, 1)
+                pdf.cell(0, 8, f"- Tariff Shock: -{params['tariff_shock']*100:.0f}% (Overseas Impact)", 0, 1) 
+                
+                pdf.ln(10)
+                pdf.set_font("Arial", "I", 10)
+                pdf.cell(0, 10, "Note: Company name omitted for universal encoding compatibility.", 0, 1)
+                
+                # 4. 生成文件
                 pdf_bytes = bytes(pdf.output())
-                st.download_button("📥 下载文件", pdf_bytes, f"Report_{row['Ticker']}.pdf", "application/pdf")
-            except:
-                st.error("导出失败")
+                st.download_button("📥 下载文件", pdf_bytes, f"Credit_Memo_{row['Ticker']}.pdf", "application/pdf")
+            except Exception as e:
+                st.error(f"导出失败: {e}")
 
     with col2:
         # 对比图 (Benchmark)
@@ -215,7 +238,7 @@ def main():
     # ==========================================
     st.subheader("📊 深度量化看板 (Portfolio Analytics)")
     
-    # 你的四张核心图表，现在全部回归
+    # 4个Tab全保留
     tab1, tab2, tab3, tab4 = st.tabs(["🗺️ 全景热力图", "🛁 竞争格局(气泡)", "🎻 评级分布", "🔗 归因分析"])
 
     # 1. 热力图 (Treemap)
