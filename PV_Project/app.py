@@ -9,10 +9,14 @@ from fpdf import FPDF
 import io
 
 # ==========================================
-# 0. 系统配置 (旗舰版黑白风 - V22 UI)
+# 0. 系统配置 (黑金旗舰版)
 # ==========================================
-st.set_page_config(page_title="全球信贷透视系统 V22.1 (旗舰版)", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="Global Credit Lens V23", layout="wide", page_icon="🏦")
 
+# 屏蔽烦人的Pyplot警告
+st.set_option('deprecation.showPyplotGlobalUse', False)
+
+# CSS 样式优化
 st.markdown("""
     <style>
     /* 全局黑底 */
@@ -21,10 +25,13 @@ st.markdown("""
     /* 侧边栏深灰 */
     [data-testid="stSidebar"] { background-color: #121212 !important; border-right: 1px solid #333; }
     
-    /* 标题改为纯白，更显高级与冷峻 */
+    /* 标题改为纯白 */
     h1, h2, h3 { color: #FFFFFF !important; font-weight: 700 !important; letter-spacing: 1px; }
     
-    /* 指标卡样式：黑底白字，左侧保留一点点蓝作为点缀 */
+    /* 输入框样式 */
+    .stTextInput > div > div > input { color: white; background-color: #222; border: 1px solid #444; }
+    
+    /* 指标卡样式 */
     .stMetric { background-color: #1A1A1A; border: 1px solid #333; border-left: 4px solid #0056D2; padding: 15px; border-radius: 5px; }
     
     /* Tab页签样式 */
@@ -39,7 +46,69 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 核心计算引擎 (Engine)
+# 1. 安全守门员 (Authentication)
+# ==========================================
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    
+    # 密码设置 (你可以改成你想设置的任何密码)
+    # 面试时告诉 HR：密码是 HR2026
+    CORRECT_PASSWORD = "HR2026"
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == CORRECT_PASSWORD:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store password
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # First run, show input for password.
+        st.text_input(
+            "🔒 请输入访问密钥 (Access Key) 以进入系统", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        st.caption("提示: 内部演示系统，请输入 HR2026")
+        return False
+    
+    elif not st.session_state["password_correct"]:
+        # Password incorrect, show input + error.
+        st.text_input(
+            "🔒 请输入访问密钥 (Access Key) 以进入系统", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        st.error("⛔ 密钥错误，请联系管理员")
+        return False
+    else:
+        # Password correct.
+        return True
+
+# 如果密码不对，直接停止运行下面的代码
+if not check_password():
+    st.stop()
+
+# ==========================================
+# 2. 性能加速器 (Caching)
+# ==========================================
+@st.cache_data
+def load_data(file):
+    """
+    缓存函数：只要文件没变，就不会重新读取 Excel。
+    这能极大解决 '有点卡' 的问题。
+    """
+    df = pd.read_excel(file)
+    if 'Ticker' not in df.columns:
+        df['Ticker'] = "N/A"
+    df['Ticker'] = df['Ticker'].astype(str).str.replace('.0', '', regex=False)
+    return df
+
+# ==========================================
+# 3. 核心计算引擎 (Engine)
 # ==========================================
 class CreditEngine:
     @staticmethod
@@ -86,25 +155,25 @@ class CreditEngine:
         })
 
 # ==========================================
-# 2. 主程序 (Main)
+# 4. 主程序 (Main)
 # ==========================================
 def main():
     st.sidebar.title("🎛️ 风控控制台")
     
-    # --- A. 数据源 ---
+    # --- A. 数据源 (带缓存) ---
     st.sidebar.subheader("1. 数据接入")
     uploaded_file = st.sidebar.file_uploader("上传 Excel", type=['xlsx'])
     
     if uploaded_file is not None:
         try:
-            df_raw = pd.read_excel(uploaded_file)
-            if 'Ticker' not in df_raw.columns: df_raw['Ticker'] = "N/A"
-            df_raw['Ticker'] = df_raw['Ticker'].astype(str).str.replace('.0', '', regex=False)
+            # 使用缓存加载数据，速度飞快！
+            df_raw = load_data(uploaded_file)
             st.sidebar.success(f"已联网: {len(df_raw)} 家主体")
-        except:
+        except Exception as e:
+            st.sidebar.error(f"加载失败: {e}")
             return
     else:
-        # 默认数据 (演示用)
+        # 默认数据
         st.sidebar.info("使用演示数据...")
         df_raw = pd.DataFrame([
             {'Ticker': '600438', 'Company': '通威股份', 'Gross Margin': 28.5, 'Overseas Ratio': 25.0, 'Inventory Days': 85, 'Debt Ratio': 55.0, 'Cash Flow': 1},
@@ -130,8 +199,8 @@ def main():
     # ==========================================
     # 界面第一部分：单体穿透 (Micro View)
     # ==========================================
-    st.title("GLOBAL CREDIT LENS | V22.1")
-    st.caption(f"当前分析样本: {len(df_final)} 家 | 模式: 压力测试 (Stress Testing)")
+    st.title("GLOBAL CREDIT LENS | V23.0")
+    st.caption(f"已授权访问 | 样本数: {len(df_final)} | 缓存加速: ON")
     
     # 搜索条
     search_list = df_final['Search_Label'].tolist()
@@ -161,19 +230,19 @@ def main():
         
         st.write("")
         
-        # --- 满血复活的 PDF 导出功能 (V21 内核) ---
+        # --- 满血版 PDF 导出 ---
         if st.button(f"📄 导出 {row['Ticker']} 完整审计报告"):
             try:
                 pdf = FPDF()
                 pdf.add_page()
                 
-                # 1. 标题回归专业风 (CREDIT MEMO)
+                # 1. 标题
                 pdf.set_font("Arial", "B", 24)
                 pdf.cell(0, 20, f"CREDIT MEMO: {row['Ticker']}", 0, 1, 'C')
                 pdf.line(10, 30, 200, 30)
                 pdf.ln(10)
                 
-                # 2. 核心数据 (找回 PD)
+                # 2. 核心数据
                 pdf.set_font("Arial", "", 12)
                 pdf.cell(0, 10, f"Report Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
                 pdf.cell(0, 10, f"Internal Rating: {str(row['Rating']).split(' ')[0]}", 0, 1)
@@ -185,7 +254,7 @@ def main():
                 
                 pdf.ln(10)
                 
-                # 3. 压力参数详情 (找回关税 Tariff)
+                # 3. 压力参数
                 pdf.set_font("Arial", "B", 12)
                 pdf.cell(0, 10, "STRESS TEST SCENARIO:", 0, 1)
                 pdf.set_font("Arial", "", 11)
@@ -196,29 +265,26 @@ def main():
                 pdf.set_font("Arial", "I", 10)
                 pdf.cell(0, 10, "Note: Company name omitted for universal encoding compatibility.", 0, 1)
                 
-                # 4. 生成文件
                 pdf_bytes = bytes(pdf.output())
                 st.download_button("📥 下载文件", pdf_bytes, f"Credit_Memo_{row['Ticker']}.pdf", "application/pdf")
             except Exception as e:
                 st.error(f"导出失败: {e}")
 
     with col2:
-        # 对比图 (Benchmark)
+        # 对比图
         avg_score = df_final['Score'].mean()
         avg_gm = df_final['Stressed_GM'].mean()
         
         fig = go.Figure()
-        # 行业线
         fig.add_trace(go.Bar(
-            y=['综合评分', '压力后毛利', '负债健康度(1-Debt%)'], 
+            y=['综合评分', '压力后毛利', '负债健康度'], 
             x=[avg_score, avg_gm, 100-df_final['Debt Ratio'].mean()],
             name='行业平均', orientation='h', marker_color='#333'
         ))
-        # 个股线
         fig.add_trace(go.Bar(
-            y=['综合评分', '压力后毛利', '负债健康度(1-Debt%)'], 
+            y=['综合评分', '压力后毛利', '负债健康度'], 
             x=[row['Score'], row['Stressed_GM'], 100-row['Debt Ratio']],
-            name=row['Company'], orientation='h', marker_color='#00E5FF' # 个股保留高亮蓝，突出显示
+            name=row['Company'], orientation='h', marker_color='#00E5FF'
         ))
         fig.update_layout(
             title=f"{row['Company']} vs 行业基准", 
@@ -238,22 +304,20 @@ def main():
     # ==========================================
     st.subheader("📊 深度量化看板 (Portfolio Analytics)")
     
-    # 4个Tab全保留
     tab1, tab2, tab3, tab4 = st.tabs(["🗺️ 全景热力图", "🛁 竞争格局(气泡)", "🎻 评级分布", "🔗 归因分析"])
 
-    # 1. 热力图 (Treemap)
+    # 1. 热力图
     with tab1:
         if not df_final.empty:
             fig_map = px.treemap(df_final, path=[px.Constant("全市场"), 'Rating', 'Search_Label'], values='Score',
                                  color='Score', color_continuous_scale='RdYlGn',
-                                 title="信用风险分布热力图 (面积=评分权重)")
+                                 title="信用风险分布热力图")
             fig_map.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_map, use_container_width=True)
 
-    # 2. 气泡图 (Bubble)
+    # 2. 气泡图
     with tab2:
         if not df_final.empty:
-            # X轴=毛利, Y轴=评分, 大小=负债率
             fig_bub = px.scatter(df_final, x="Stressed_GM", y="Score", size="Debt Ratio", color="Rating",
                                  hover_name="Company", text="Company",
                                  title="盈利能力 vs 信用评分 (气泡大小=负债率)",
@@ -262,9 +326,8 @@ def main():
             fig_bub.update_traces(textposition='top center')
             fig_bub.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_bub, use_container_width=True)
-            st.caption("💡 洞察：位于右下角的大气泡是'高风险僵尸企业'（负债高、分低），右上角是'现金牛'。")
 
-    # 3. 分布图 (Strip/Violin)
+    # 3. 分布图
     with tab3:
         if not df_final.empty:
             fig_vio = px.strip(df_final, x="Rating", y="Score", color="Rating", 
@@ -272,21 +335,17 @@ def main():
                                category_orders={"Rating": ["AAA", "AA", "BBB", "BB", "CCC"]})
             fig_vio.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_vio, use_container_width=True)
-            st.caption("💡 洞察：观察点的密集程度。如果大量点集中在 CCC，说明行业系统性风险极高。")
 
-    # 4. 相关性矩阵 (Correlation)
+    # 4. 相关性矩阵
     with tab4:
         if not df_final.empty:
-            # 只选取数值型列进行计算
             cols_to_corr = ['Score', 'Gross Margin', 'Overseas Ratio', 'Inventory Days', 'Debt Ratio']
             corr_matrix = df_final[cols_to_corr].corr()
-            
             fig_corr = px.imshow(corr_matrix, text_auto=True, aspect="auto",
                                  color_continuous_scale='RdBu_r', 
-                                 title="风险因子相关性矩阵 (Factor Correlation)")
+                                 title="风险因子相关性矩阵")
             fig_corr.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_corr, use_container_width=True)
-            st.caption("💡 洞察：红色(1.0)代表正相关，蓝色(-1.0)代表负相关。查看哪个因子对 Score 的影响最大（颜色最深）。")
 
 if __name__ == "__main__":
     main()
