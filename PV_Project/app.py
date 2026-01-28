@@ -9,103 +9,64 @@ from fpdf import FPDF
 import io
 
 # ==========================================
-# 0. 系统配置 (黑金旗舰版)
+# 0. 系统配置 (V24.1 终极版)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V23.1", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="Global Credit Lens V24.1", layout="wide", page_icon="🏦")
+st.set_option('deprecation.showPyplotGlobalUse', False)
 
-# 修复：删除了报错的 deprecation 配置项，直接进入样式配置
-# CSS 样式优化
+# CSS 样式
 st.markdown("""
     <style>
-    /* 全局黑底 */
     .stApp { background-color: #000000 !important; color: #E0E0E0; font-family: 'Microsoft YaHei', sans-serif; }
-    
-    /* 侧边栏深灰 */
     [data-testid="stSidebar"] { background-color: #121212 !important; border-right: 1px solid #333; }
-    
-    /* 标题改为纯白 */
     h1, h2, h3 { color: #FFFFFF !important; font-weight: 700 !important; letter-spacing: 1px; }
-    
-    /* 输入框样式 */
-    .stTextInput > div > div > input { color: white; background-color: #222; border: 1px solid #444; }
-    
-    /* 指标卡样式 */
     .stMetric { background-color: #1A1A1A; border: 1px solid #333; border-left: 4px solid #0056D2; padding: 15px; border-radius: 5px; }
-    
-    /* Tab页签样式 */
     .stTabs [data-baseweb="tab-list"] { gap: 10px; }
     .stTabs [data-baseweb="tab"] { background-color: #1A1A1A; border-radius: 4px 4px 0 0; color: #888; }
     .stTabs [aria-selected="true"] { background-color: #0056D2 !important; color: white !important; }
-    
-    /* 按钮样式 */
     .stButton>button { background-color: #222; color: white; border: 1px solid #444; border-radius: 4px; }
     .stButton>button:hover { border-color: #0056D2; color: #0056D2; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 安全守门员 (Authentication)
+# 1. 安全鉴权
 # ==========================================
 def check_password():
-    """Returns `True` if the user had the correct password."""
-    
-    # 密码设置 (你可以改成你想设置的任何密码)
     CORRECT_PASSWORD = "HR2026"
-
     def password_entered():
-        """Checks whether a password entered by the user is correct."""
         if st.session_state["password"] == CORRECT_PASSWORD:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Don't store password
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        # First run, show input for password.
-        st.text_input(
-            "🔒 请输入访问密钥 (Access Key) 以进入系统", 
-            type="password", 
-            on_change=password_entered, 
-            key="password"
-        )
-        st.caption("提示: 内部演示系统，请输入 HR2026")
+        st.text_input("🔒 访问密钥 (Access Key)", type="password", on_change=password_entered, key="password")
+        st.caption("提示: HR2026")
         return False
-    
     elif not st.session_state["password_correct"]:
-        # Password incorrect, show input + error.
-        st.text_input(
-            "🔒 请输入访问密钥 (Access Key) 以进入系统", 
-            type="password", 
-            on_change=password_entered, 
-            key="password"
-        )
-        st.error("⛔ 密钥错误，请联系管理员")
+        st.text_input("🔒 访问密钥 (Access Key)", type="password", on_change=password_entered, key="password")
+        st.error("⛔ 密钥错误")
         return False
     else:
-        # Password correct.
         return True
 
-# 如果密码不对，直接停止运行下面的代码
 if not check_password():
     st.stop()
 
 # ==========================================
-# 2. 性能加速器 (Caching)
+# 2. 缓存加速
 # ==========================================
 @st.cache_data
 def load_data(file):
-    """
-    缓存函数：只要文件没变，就不会重新读取 Excel。
-    这能极大解决 '有点卡' 的问题。
-    """
     df = pd.read_excel(file)
-    if 'Ticker' not in df.columns:
-        df['Ticker'] = "N/A"
+    if 'Ticker' not in df.columns: df['Ticker'] = "N/A"
     df['Ticker'] = df['Ticker'].astype(str).str.replace('.0', '', regex=False)
     return df
 
 # ==========================================
-# 3. 核心计算引擎 (Engine)
+# 3. 五维计算引擎 (5-Factor Engine)
 # ==========================================
 class CreditEngine:
     @staticmethod
@@ -125,17 +86,36 @@ class CreditEngine:
         except:
             return pd.Series({'Score': 0, 'Rating': 'Error', 'PD_Prob': 1.0, 'Stressed_GM': 0})
 
-        # 压力测试
-        stressed_gm = base_gm - (params['margin_shock'] / 100.0)
+        # --- 五维压力传导逻辑 (5-Factor Logic) ---
+        
+        # 1. 行业内卷 (Margin Shock)
+        market_hit = params['margin_shock'] / 100.0
+        
+        # 2. 关税冲击 (Tariff Shock) -> 影响海外部分
         tariff_hit = (overseas / 100.0) * params['tariff_shock'] * 100
-        final_gm = stressed_gm - tariff_hit
         
-        # 宏观调整
-        macro_adj = -0.5 if "衰退" in macro_status or "萧条" in macro_status else 0
+        # 3. 原材料通胀 (Input Cost) -> 传导系数 0.2
+        input_cost_hit = params['raw_material_shock'] * 0.2
         
-        # Logit 公式
+        # 4. 汇率冲击 (FX Shock) -> 影响海外部分 (新增!)
+        # 假设人民币升值/美元贬值，海外收入换回国内会变少
+        fx_hit = (overseas / 100.0) * params['fx_shock'] 
+
+        # 计算折后毛利
+        final_gm = base_gm - market_hit - tariff_hit - input_cost_hit - fx_hit
+        final_gm = max(final_gm, -10.0) # 允许亏损更多
+
+        # 5. 加息冲击 (Rate Hike) -> 惩罚高负债
+        rate_hit = (debt_ratio / 100.0) * (params['rate_hike_bps'] / 100.0) * 5.0
+
+        # --- Logit 模型 ---
         intercept = -0.5
-        logit_z = intercept + (-0.15 * final_gm) + (0.02 * inv) + (0.05 * debt_ratio) + (-1.2 * cf_flag) + macro_adj
+        logit_z = intercept + \
+                  (-0.15 * final_gm) + \
+                  (0.02 * inv) + \
+                  (0.05 * debt_ratio) + \
+                  (-1.2 * cf_flag) + \
+                  rate_hit
                   
         pd_val = CreditEngine.sigmoid(logit_z)
         score = 100 * (1 - pd_val)
@@ -152,54 +132,71 @@ class CreditEngine:
         })
 
 # ==========================================
-# 4. 主程序 (Main)
+# 4. 主程序
 # ==========================================
 def main():
-    st.sidebar.title("🎛️ 风控控制台")
+    st.sidebar.title("🎛️ 压力测试实验室")
     
-    # --- A. 数据源 (带缓存) ---
+    # --- A. 数据源 ---
     st.sidebar.subheader("1. 数据接入")
     uploaded_file = st.sidebar.file_uploader("上传 Excel", type=['xlsx'])
     
     if uploaded_file is not None:
         try:
-            # 使用缓存加载数据，速度飞快！
             df_raw = load_data(uploaded_file)
             st.sidebar.success(f"已联网: {len(df_raw)} 家主体")
-        except Exception as e:
-            st.sidebar.error(f"加载失败: {e}")
-            return
+        except: return
     else:
-        # 默认数据
         st.sidebar.info("使用演示数据...")
         df_raw = pd.DataFrame([
             {'Ticker': '600438', 'Company': '通威股份', 'Gross Margin': 28.5, 'Overseas Ratio': 25.0, 'Inventory Days': 85, 'Debt Ratio': 55.0, 'Cash Flow': 1},
-            {'Ticker': '300750', 'Company': '宁德时代', 'Gross Margin': 22.0, 'Overseas Ratio': 35.0, 'Inventory Days': 70, 'Debt Ratio': 45.0, 'Cash Flow': 1},
-            {'Ticker': '601012', 'Company': '隆基绿能', 'Gross Margin': 18.0, 'Overseas Ratio': 45.0, 'Inventory Days': 95, 'Debt Ratio': 50.0, 'Cash Flow': 1}
+            {'Ticker': '300750', 'Company': '宁德时代', 'Gross Margin': 22.0, 'Overseas Ratio': 35.0, 'Inventory Days': 70, 'Debt Ratio': 45.0, 'Cash Flow': 1}
         ])
 
-    # --- B. 参数 ---
+    # --- B. 五维压力参数 (真正集齐 5 个) ---
     st.sidebar.markdown("---")
-    st.sidebar.subheader("2. 压力参数")
-    margin_shock = st.sidebar.slider("毛利冲击 (bps)", 0, 1000, 300)
-    tariff_shock = st.sidebar.slider("关税冲击 (%)", 0.0, 1.0, 0.25)
-    params = {'margin_shock': margin_shock, 'tariff_shock': tariff_shock}
+    st.sidebar.subheader("2. 宏观压力参数 (5 Factors)")
+    
+    # 1. 市场
+    st.sidebar.caption("📉 市场环境")
+    margin_shock = st.sidebar.slider("1. 行业内卷 (bps)", 0, 1000, 300)
+    
+    # 2. 贸易
+    st.sidebar.caption("🚢 地缘政治")
+    tariff_shock = st.sidebar.slider("2. 关税壁垒 (%)", 0.0, 1.0, 0.25)
+    
+    # 3. 资金
+    st.sidebar.caption("💰 资金成本")
+    rate_hike = st.sidebar.slider("3. 美联储加息 (bps)", 0, 500, 100)
+    
+    # 4. 供应链
+    st.sidebar.caption("🧱 供应链")
+    raw_mat_shock = st.sidebar.slider("4. 原材料通胀 (%)", 0, 50, 10)
+    
+    # 5. 汇率 (新增!)
+    st.sidebar.caption("💱 汇率风险 (New)")
+    fx_shock = st.sidebar.slider("5. 汇率波动损失 (%)", 0, 20, 5, help="非美货币贬值导致的汇兑损失")
+    
+    params = {
+        'margin_shock': margin_shock, 
+        'tariff_shock': tariff_shock,
+        'rate_hike_bps': rate_hike,
+        'raw_material_shock': raw_mat_shock,
+        'fx_shock': fx_shock
+    }
 
     # --- 计算 ---
     try:
         res = df_raw.apply(lambda r: CreditEngine.calculate(r, params, "衰退期"), axis=1)
         df_final = pd.concat([df_raw, res], axis=1)
         df_final['Search_Label'] = df_final['Ticker'] + " | " + df_final['Company']
-    except:
-        return
+    except: return
 
-    # ==========================================
-    # 界面第一部分：单体穿透 (Micro View)
-    # ==========================================
-    st.title("GLOBAL CREDIT LENS | V23.1")
-    st.caption(f"已授权访问 | 样本数: {len(df_final)} | 缓存加速: ON")
+    # --- 界面 ---
+    st.title("GLOBAL CREDIT LENS | V24.1")
+    st.caption(f"模型状态: 五维全量压力测试 (5-Factor Stress Model)")
     
-    # 搜索条
+    # 搜索
     search_list = df_final['Search_Label'].tolist()
     c_search, c_blank = st.columns([1, 2])
     with c_search:
@@ -208,11 +205,9 @@ def main():
     selected_ticker = selected_label.split(" | ")[0]
     row = df_final[df_final['Ticker'] == selected_ticker].iloc[0]
 
-    # 单体展示区
+    # 单体
     col1, col2 = st.columns([1, 2])
-    
     with col1:
-        # 评级卡片
         rating_color = '#28A745' if row['Score'] >= 70 else '#DC3545'
         st.markdown(f"""
             <div style="background-color:#1A1A1A; padding:20px; border-radius:8px; border:1px solid #333;">
@@ -227,121 +222,106 @@ def main():
         
         st.write("")
         
-        # --- 满血版 PDF 导出 ---
-        if st.button(f"📄 导出 {row['Ticker']} 完整审计报告"):
+        # PDF 导出 (包含 5 个参数)
+        if st.button(f"📄 导出 {row['Ticker']} 研报"):
             try:
                 pdf = FPDF()
                 pdf.add_page()
-                
-                # 1. 标题
                 pdf.set_font("Arial", "B", 24)
                 pdf.cell(0, 20, f"CREDIT MEMO: {row['Ticker']}", 0, 1, 'C')
                 pdf.line(10, 30, 200, 30)
                 pdf.ln(10)
                 
-                # 2. 核心数据
                 pdf.set_font("Arial", "", 12)
-                pdf.cell(0, 10, f"Report Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
-                pdf.cell(0, 10, f"Internal Rating: {str(row['Rating']).split(' ')[0]}", 0, 1)
-                pdf.cell(0, 10, f"Credit Score: {row['Score']:.1f} / 100", 0, 1)
-                
-                # 加粗显示违约概率 (PD)
-                pdf.set_font("Arial", "B", 12) 
-                pdf.cell(0, 10, f"Probability of Default (PD): {row['PD_Prob']:.2%}", 0, 1) 
+                pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
+                pdf.cell(0, 10, f"Rating: {str(row['Rating']).split(' ')[0]}", 0, 1)
+                pdf.set_font("Arial", "B", 12)
+                pdf.cell(0, 10, f"PD: {row['PD_Prob']:.2%}", 0, 1)
                 
                 pdf.ln(10)
-                
-                # 3. 压力参数
                 pdf.set_font("Arial", "B", 12)
-                pdf.cell(0, 10, "STRESS TEST SCENARIO:", 0, 1)
+                pdf.cell(0, 10, "5-FACTOR STRESS TEST:", 0, 1)
                 pdf.set_font("Arial", "", 11)
-                pdf.cell(0, 8, f"- Margin Shock: -{params['margin_shock']} bps (Profit Impact)", 0, 1)
-                pdf.cell(0, 8, f"- Tariff Shock: -{params['tariff_shock']*100:.0f}% (Overseas Impact)", 0, 1) 
+                pdf.cell(0, 8, f"1. Margin Shock: -{params['margin_shock']} bps", 0, 1)
+                pdf.cell(0, 8, f"2. Tariff Shock: -{params['tariff_shock']*100:.0f}%", 0, 1)
+                pdf.cell(0, 8, f"3. Rate Hike: +{params['rate_hike_bps']} bps", 0, 1)
+                pdf.cell(0, 8, f"4. Input Cost: +{params['raw_material_shock']}%", 0, 1)
+                pdf.cell(0, 8, f"5. FX Shock: -{params['fx_shock']}% (New)", 0, 1) # 新增
                 
                 pdf.ln(10)
                 pdf.set_font("Arial", "I", 10)
-                pdf.cell(0, 10, "Note: Company name omitted for universal encoding compatibility.", 0, 1)
+                pdf.cell(0, 10, "Note: Automated by Global Credit Lens V24.1", 0, 1)
                 
                 pdf_bytes = bytes(pdf.output())
-                st.download_button("📥 下载文件", pdf_bytes, f"Credit_Memo_{row['Ticker']}.pdf", "application/pdf")
+                st.download_button("📥 下载 PDF", pdf_bytes, f"Report_{row['Ticker']}.pdf", "application/pdf")
             except Exception as e:
                 st.error(f"导出失败: {e}")
 
     with col2:
-        # 对比图
-        avg_score = df_final['Score'].mean()
-        avg_gm = df_final['Stressed_GM'].mean()
+        # 雷达图
+        categories = ['综合评分', '毛利抗压', '负债健康', '现金流', '库存周转']
+        def normalize(val, max_val): return min(max(val, 0), max_val) / max_val * 100
         
+        row_vals = [
+            row['Score'], 
+            normalize(row['Stressed_GM'] + 10, 50), 
+            normalize(100 - row['Debt Ratio'], 100),
+            100 if row['Cash Flow'] > 0 else 20,
+            normalize(365 - row['Inventory Days'], 365)
+        ]
+        
+        avg_vals = [
+            df_final['Score'].mean(),
+            normalize(df_final['Stressed_GM'].mean() + 10, 50),
+            normalize(100 - df_final['Debt Ratio'].mean(), 100),
+            60,
+            normalize(365 - df_final['Inventory Days'].mean(), 365)
+        ]
+
         fig = go.Figure()
-        fig.add_trace(go.Bar(
-            y=['综合评分', '压力后毛利', '负债健康度'], 
-            x=[avg_score, avg_gm, 100-df_final['Debt Ratio'].mean()],
-            name='行业平均', orientation='h', marker_color='#333'
-        ))
-        fig.add_trace(go.Bar(
-            y=['综合评分', '压力后毛利', '负债健康度'], 
-            x=[row['Score'], row['Stressed_GM'], 100-row['Debt Ratio']],
-            name=row['Company'], orientation='h', marker_color='#00E5FF'
-        ))
+        fig.add_trace(go.Scatterpolar(r=avg_vals, theta=categories, fill='toself', name='行业平均', line_color='#444'))
+        fig.add_trace(go.Scatterpolar(r=row_vals, theta=categories, fill='toself', name=row['Company'], line_color='#00E5FF'))
+        
         fig.update_layout(
-            title=f"{row['Company']} vs 行业基准", 
-            template="plotly_dark", 
-            height=320, 
-            margin=dict(l=0,r=0,t=40,b=0),
-            paper_bgcolor='rgba(0,0,0,0)', 
-            plot_bgcolor='rgba(0,0,0,0)',
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+            template="plotly_dark", height=320, 
+            title=f"{row['Company']} 五维雷达",
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=40, r=40, t=40, b=20)
         )
         st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
-
-    # ==========================================
-    # 界面第二部分：深度量化看板 (Macro View)
-    # ==========================================
-    st.subheader("📊 深度量化看板 (Portfolio Analytics)")
+    st.subheader("📊 深度量化看板")
+    tab1, tab2, tab3, tab4 = st.tabs(["全景热力", "竞争气泡", "评级分布", "因子归因"])
     
-    tab1, tab2, tab3, tab4 = st.tabs(["🗺️ 全景热力图", "🛁 竞争格局(气泡)", "🎻 评级分布", "🔗 归因分析"])
-
-    # 1. 热力图
     with tab1:
         if not df_final.empty:
             fig_map = px.treemap(df_final, path=[px.Constant("全市场"), 'Rating', 'Search_Label'], values='Score',
-                                 color='Score', color_continuous_scale='RdYlGn',
-                                 title="信用风险分布热力图")
-            fig_map.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)')
+                                 color='Score', color_continuous_scale='RdYlGn')
+            fig_map.update_layout(template="plotly_dark", height=450, paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_map, use_container_width=True)
-
-    # 2. 气泡图
+            
     with tab2:
         if not df_final.empty:
             fig_bub = px.scatter(df_final, x="Stressed_GM", y="Score", size="Debt Ratio", color="Rating",
                                  hover_name="Company", text="Company",
-                                 title="盈利能力 vs 信用评分 (气泡大小=负债率)",
-                                 labels={"Stressed_GM": "压力后毛利率(%)", "Score": "信用评分", "Debt Ratio": "负债率"},
                                  color_discrete_sequence=px.colors.qualitative.Bold)
-            fig_bub.update_traces(textposition='top center')
-            fig_bub.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)')
+            fig_bub.update_layout(template="plotly_dark", height=450, paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_bub, use_container_width=True)
 
-    # 3. 分布图
     with tab3:
         if not df_final.empty:
-            fig_vio = px.strip(df_final, x="Rating", y="Score", color="Rating", 
-                               title="信用评级分布密度",
-                               category_orders={"Rating": ["AAA", "AA", "BBB", "BB", "CCC"]})
-            fig_vio.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)')
+            fig_vio = px.strip(df_final, x="Rating", y="Score", color="Rating")
+            fig_vio.update_layout(template="plotly_dark", height=450, paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_vio, use_container_width=True)
 
-    # 4. 相关性矩阵
     with tab4:
         if not df_final.empty:
             cols_to_corr = ['Score', 'Gross Margin', 'Overseas Ratio', 'Inventory Days', 'Debt Ratio']
             corr_matrix = df_final[cols_to_corr].corr()
-            fig_corr = px.imshow(corr_matrix, text_auto=True, aspect="auto",
-                                 color_continuous_scale='RdBu_r', 
-                                 title="风险因子相关性矩阵")
-            fig_corr.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)')
+            fig_corr = px.imshow(corr_matrix, text_auto=True, aspect="auto", color_continuous_scale='RdBu_r')
+            fig_corr.update_layout(template="plotly_dark", height=450, paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_corr, use_container_width=True)
 
 if __name__ == "__main__":
