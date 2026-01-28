@@ -11,11 +11,9 @@ import io
 # ==========================================
 # 0. 系统配置 (黑金旗舰版)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V23", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="Global Credit Lens V23.1", layout="wide", page_icon="🏦")
 
-# 屏蔽烦人的Pyplot警告
-st.set_option('deprecation.showPyplotGlobalUse', False)
-
+# 修复：删除了报错的 deprecation 配置项，直接进入样式配置
 # CSS 样式优化
 st.markdown("""
     <style>
@@ -52,7 +50,6 @@ def check_password():
     """Returns `True` if the user had the correct password."""
     
     # 密码设置 (你可以改成你想设置的任何密码)
-    # 面试时告诉 HR：密码是 HR2026
     CORRECT_PASSWORD = "HR2026"
 
     def password_entered():
@@ -199,7 +196,7 @@ def main():
     # ==========================================
     # 界面第一部分：单体穿透 (Micro View)
     # ==========================================
-    st.title("GLOBAL CREDIT LENS | V23.0")
+    st.title("GLOBAL CREDIT LENS | V23.1")
     st.caption(f"已授权访问 | 样本数: {len(df_final)} | 缓存加速: ON")
     
     # 搜索条
