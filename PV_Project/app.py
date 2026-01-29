@@ -3,29 +3,40 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
-import uuid
 from datetime import datetime
 from fpdf import FPDF
 import io
-import graphviz # 新增：用于绘制架构图
 
 # ==========================================
-# 0. 系统配置 (V26.1 最终交付版)
+# 0. 系统配置 (V26.4 最终架构师版)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V26.1", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="Global Credit Lens V26.4", layout="wide", page_icon="🏦")
 
 # CSS 样式: 黑金/投行风
 st.markdown("""
     <style>
-    .stApp { background-color: #000000 !important; color: #E0E0E0; font-family: 'Microsoft YaHei', sans-serif; }
+    /* 全局深色背景 */
+    .stApp { background-color: #000000 !important; color: #E0E0E0; font-family: 'Segoe UI', sans-serif; }
+    
+    /* 侧边栏 */
     [data-testid="stSidebar"] { background-color: #121212 !important; border-right: 1px solid #333; }
-    h1, h2, h3 { color: #FFFFFF !important; font-weight: 700 !important; letter-spacing: 1px; }
+    
+    /* 标题与文字 */
+    h1, h2, h3 { color: #FFFFFF !important; font-weight: 600 !important; letter-spacing: 0.5px; }
+    .stMarkdown p { font-size: 14px; }
+    
+    /* 组件样式 */
     .stMetric { background-color: #1A1A1A; border: 1px solid #333; border-left: 4px solid #0056D2; padding: 15px; border-radius: 5px; }
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] { background-color: #1A1A1A; border-radius: 4px 4px 0 0; color: #888; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab"] { background-color: #1A1A1A; border-radius: 4px 4px 0 0; color: #888; border: none; }
     .stTabs [aria-selected="true"] { background-color: #0056D2 !important; color: white !important; }
-    .stButton>button { background-color: #222; color: white; border: 1px solid #444; border-radius: 4px; }
-    .stButton>button:hover { border-color: #0056D2; color: #0056D2; }
+    
+    /* 按钮样式 */
+    .stButton>button { background-color: #222; color: white; border: 1px solid #444; border-radius: 4px; transition: all 0.3s; }
+    .stButton>button:hover { border-color: #0056D2; color: #0056D2; transform: translateY(-1px); }
+    
+    /* Expander */
+    .streamlit-expanderHeader { background-color: #222 !important; color: white !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -49,16 +60,31 @@ def load_data(file):
     return df
 
 # ==========================================
-# 2. 核心计算引擎 (Logit + Stress)
+# 2. 核心计算引擎 (Logit + PDO Scaling)
 # ==========================================
 class CreditEngine:
     @staticmethod
     def sigmoid(z): return 1 / (1 + np.exp(-z))
 
     @staticmethod
+    def scale_score(pd_val, base_score=600, base_odds=50, pdo=20):
+        """
+        [PDO Engine] 将概率转换为 FICO 风格分数
+        Formula: Score = Offset + Factor * ln(Odds)
+        """
+        if pd_val >= 1.0: return 300
+        if pd_val <= 0.0: return 850
+        
+        factor = pdo / np.log(2)
+        offset = base_score - (factor * np.log(base_odds))
+        current_odds = (1 - pd_val) / pd_val
+        score = offset + (factor * np.log(current_odds))
+        return int(max(300, min(850, score)))
+
+    @staticmethod
     def calculate(row, params, macro_status):
         try:
-            # 基础指标
+            # 特征提取
             base_gm = float(row.get('Gross Margin', 0))       
             debt_ratio = float(row.get('Debt Ratio', 50))     
             overseas = float(row.get('Overseas Ratio', 0))    
@@ -67,7 +93,7 @@ class CreditEngine:
             cf_flag = 1 if cf > 0 else 0
         except: return pd.Series({'Score': 0, 'Rating': 'Error', 'PD_Prob': 1.0, 'Stressed_GM': 0})
 
-        # 压力测试
+        # 压力传导 (Deterministic Simulation)
         market_hit = params.get('margin_shock', 0) / 100.0
         tariff_hit = (overseas / 100.0) * params.get('tariff_shock', 0) * 100
         input_cost_hit = params.get('raw_material_shock', 0) * 0.2
@@ -76,16 +102,20 @@ class CreditEngine:
         final_gm = max(base_gm - market_hit - tariff_hit - input_cost_hit - fx_hit, -10.0)
         rate_hit = (debt_ratio / 100.0) * (params.get('rate_hike_bps', 0) / 100.0) * 5.0
 
-        # Logit 公式
+        # Logit 回归
         logit_z = -0.5 + (-0.15 * final_gm) + (0.02 * inv) + (0.05 * debt_ratio) + (-1.2 * cf_flag) + rate_hit
         pd_val = CreditEngine.sigmoid(logit_z)
-        score = 100 * (1 - pd_val)
         
-        if score >= 85: rating = "AAA"
-        elif score >= 70: rating = "AA"
-        elif score >= 55: rating = "BBB"
-        elif score >= 40: rating = "BB"
-        else: rating = "CCC"
+        # PDO 分数校准
+        score = CreditEngine.scale_score(pd_val, base_score=600, base_odds=50, pdo=20)
+        
+        # 评级映射
+        if score >= 750: rating = "AA (High Grade)"
+        elif score >= 700: rating = "A (Upper Medium)"
+        elif score >= 650: rating = "BBB (Medium)"
+        elif score >= 600: rating = "BB (Speculative)"
+        elif score >= 500: rating = "B (Highly Speculative)"
+        else: rating = "CCC (Substantial Risk)"
         
         return pd.Series({'Stressed_GM': final_gm, 'PD_Prob': pd_val, 'Score': score, 'Rating': rating})
 
@@ -93,30 +123,48 @@ class CreditEngine:
 # 3. 巴塞尔资本引擎 (Basel III RWA)
 # ==========================================
 class BaselEngine:
-    """
-    巴塞尔协议 III 标准法资本计算器
-    """
     def __init__(self):
-        # 风险权重映射表 (Standardized Approach)
-        self.rw_map = {
-            'AAA': 0.20, 'AA': 0.20,
-            'A': 0.50, 'BBB': 1.00,
-            'BB': 1.00, 'B': 1.50,
-            'CCC': 1.50, 'CC': 2.50, 'C': 2.50
-        }
-        self.capital_ratio = 0.08 # 最低资本充足率 8%
+        self.rw_map = {'AA (High Grade)': 0.20, 'A (Upper Medium)': 0.50, 'BBB (Medium)': 1.00, 
+                       'BB (Speculative)': 1.00, 'B (Highly Speculative)': 1.50, 'CCC (Substantial Risk)': 1.50}
+        self.capital_ratio = 0.08 
 
     def calculate_rwa(self, exposure, rating):
-        # 1. 查找风险权重 (Risk Weight)
-        rw = self.rw_map.get(rating, 1.50) # 默认高风险
-        # 2. 计算 RWA
+        # 模糊匹配评级
+        rw = 1.50
+        for key in self.rw_map:
+            if rating.startswith(key.split(' ')[0]):
+                rw = self.rw_map[key]
+                break
         rwa = exposure * rw
-        # 3. 计算资本占用 (Capital Charge)
         charge = rwa * self.capital_ratio
         return rw, rwa, charge
 
 # ==========================================
-# 4. IV 计算引擎
+# 4. 黑天鹅引擎 (Operating Leverage)
+# ==========================================
+class BlackSwanEngine:
+    @staticmethod
+    def simulate_survival(row, shock_factor, fixed_cost_ratio=0.25):
+        gross_margin = float(row.get('Gross Margin', 20)) / 100.0
+        base_revenue = 100.0
+        base_cogs = base_revenue * (1 - gross_margin)
+        base_fixed_cost = base_revenue * fixed_cost_ratio 
+        base_net_profit = base_revenue - base_cogs - base_fixed_cost
+        
+        # 黑天鹅打击：营收下跌，固定成本不变
+        new_revenue = base_revenue * (1 - shock_factor)
+        new_cogs = new_revenue * (1 - gross_margin)
+        new_net_profit = new_revenue - new_cogs - base_fixed_cost
+        
+        return {
+            'Base_Profit': base_net_profit,
+            'Impact': new_net_profit - base_net_profit,
+            'Final_Profit': new_net_profit,
+            'Is_Survive': new_net_profit > 0
+        }
+
+# ==========================================
+# 5. IV 计算引擎 (Validation)
 # ==========================================
 class IV_Engine:
     @staticmethod
@@ -128,13 +176,11 @@ class IV_Engine:
                 temp_df[col] = pd.to_numeric(temp_df[col], errors='coerce').fillna(0)
                 try: temp_df['bucket'] = pd.qcut(temp_df[col], q=4, duplicates='drop')
                 except: temp_df['bucket'] = pd.cut(temp_df[col], bins=4)
-                
                 grouped = temp_df.groupby('bucket', observed=False)[target_col].agg(['count', 'sum'])
                 grouped['bad'] = grouped['sum']
                 grouped['good'] = grouped['count'] - grouped['sum']
                 total_bad = grouped['bad'].sum() + 1e-5
                 total_good = grouped['good'].sum() + 1e-5
-                
                 grouped['dist_bad'] = (grouped['bad'] + 1e-5) / total_bad
                 grouped['dist_good'] = (grouped['good'] + 1e-5) / total_good
                 grouped['woe'] = np.log(grouped['dist_good'] / grouped['dist_bad'])
@@ -144,13 +190,13 @@ class IV_Engine:
         return pd.DataFrame(iv_list).sort_values(by='IV', ascending=False)
 
 # ==========================================
-# 5. 主程序
+# 6. 主程序
 # ==========================================
 def main():
     st.sidebar.title("🎛️ 压力测试实验室")
     
     # A. 数据接入
-    st.sidebar.subheader("1. 数据接入")
+    st.sidebar.subheader("1. 数据接入 (Data Feed)")
     uploaded_file = st.sidebar.file_uploader("上传 Excel", type=['xlsx'])
     if uploaded_file: df_raw = load_data(uploaded_file)
     else:
@@ -162,7 +208,7 @@ def main():
             {'Ticker': '002459', 'Company': '晶澳科技', 'Gross Margin': 15.5, 'Overseas Ratio': 55.0, 'Inventory Days': 88, 'Debt Ratio': 60.0, 'Cash Flow': 0}
         ])
 
-    # B. 压力参数
+    # B. 宏观压力参数
     st.sidebar.markdown("---")
     st.sidebar.subheader("2. 宏观压力参数")
     params = {
@@ -172,191 +218,185 @@ def main():
         'raw_material_shock': st.sidebar.slider("4. 原材料通胀 (%)", 0, 50, 10),
         'fx_shock': st.sidebar.slider("5. 汇率风险 (%)", 0, 20, 5)
     }
+    
+    # C. 黑天鹅参数
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🏴‍☠️ 黑天鹅生成器")
+    st.sidebar.caption("Tail Risk & Operating Leverage Simulation")
+    swan_shock = st.sidebar.slider("📉 营收瞬间蒸发 (%)", 0, 80, 40)
+    fixed_cost_sim = st.sidebar.slider("🏭 假设固定成本占比 (%)", 10, 60, 25)
 
-    # C. 计算 (双重计算：Base vs Stressed)
+    # D. 批量计算
     try:
-        # 1. 压力环境 (Stressed)
+        # 1. 压力情景
         res_stressed = df_raw.apply(lambda r: CreditEngine.calculate(r, params, "Stressed"), axis=1)
         df_final = pd.concat([df_raw, res_stressed], axis=1)
-        
-        # 2. 基准环境 (Base Case - 所有参数归零)
+        # 2. 基准情景 (Base Case)
         base_params = {k:0 for k in params}
         res_base = df_raw.apply(lambda r: CreditEngine.calculate(r, base_params, "Base"), axis=1)
-        df_final['Base_Rating'] = res_base['Rating'] # 保存基准评级用于对比
-        
+        df_final['Base_Rating'] = res_base['Rating']
         df_final['Search_Label'] = df_final['Ticker'] + " | " + df_final['Company']
     except: return
 
-    # D. 界面展示
-    st.title("GLOBAL CREDIT LENS | V26.1")
-    st.caption(f"架构: Logit + Stress Test + Basel III RWA + Architecture View")
+    # ==========================================
+    # 前端展示层
+    # ==========================================
+    st.title("GLOBAL CREDIT LENS | V26.4")
+    st.caption("Architect Edition: Logit + PDO Scaling + Basel III + Black Swan Engine")
     
-    # 检索
+    # 检索栏
     c_search, _ = st.columns([1, 2])
     with c_search:
-        selected_label = st.selectbox("🔍 穿透式检索", df_final['Search_Label'].tolist())
+        selected_label = st.selectbox("🔍 穿透式检索 (Drill-down)", df_final['Search_Label'].tolist())
     
     selected_ticker = selected_label.split(" | ")[0]
     row = df_final[df_final['Ticker'] == selected_ticker].iloc[0]
 
-    # --- 资本画像卡片 ---
-    col1, col2 = st.columns([1, 2])
+    # --- 第一排：信用仪表盘 & RWA 资本瀑布 ---
+    col1, col2 = st.columns([1, 1])
+    
     with col1:
-        # 假设贷款敞口
-        exposure = st.number_input("💰 假设贷款敞口 (Exposure, USD)", value=10_000_000, step=1_000_000)
+        st.markdown("### 🧬 Credit Profile (PDO Scaled)")
+        # 仪表盘
+        rating_color = '#28A745' if row['Score'] >= 650 else ('#FFC107' if row['Score'] >= 550 else '#DC3545')
         
-        # 调用 Basel 引擎
+        fig_gauge = go.Figure(go.Indicator(
+            mode = "gauge+number+delta", value = row['Score'],
+            domain = {'x': [0, 1], 'y': [0, 1]},
+            delta = {'reference': 600, 'increasing': {'color': "#28A745"}},
+            gauge = {
+                'axis': {'range': [300, 850], 'tickwidth': 1, 'tickcolor': "white"},
+                'bar': {'color': rating_color},
+                'bgcolor': "black", 'borderwidth': 2, 'bordercolor': "#333",
+                'steps': [
+                    {'range': [300, 550], 'color': '#550000'},
+                    {'range': [550, 650], 'color': '#555500'},
+                    {'range': [650, 850], 'color': '#003300'}
+                ],
+                'threshold': {'line': {'color': "white", 'width': 4}, 'thickness': 0.75, 'value': row['Score']}
+            }
+        ))
+        fig_gauge.update_layout(height=250, margin=dict(l=20,r=20,t=30,b=20), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+        st.plotly_chart(fig_gauge, use_container_width=True)
+        st.metric("Current Rating", row['Rating'], delta=f"PD: {row['PD_Prob']:.2%}", delta_color="inverse")
+
+    with col2:
+        st.markdown("### 🏛️ Basel III Capital Impact")
+        # 资本计算
+        exposure = 10_000_000 # 默认 10M
         basel = BaselEngine()
         rw_base, rwa_base, cap_base = basel.calculate_rwa(exposure, row['Base_Rating'])
         rw_stress, rwa_stress, cap_stress = basel.calculate_rwa(exposure, row['Rating'])
         cap_delta = cap_stress - cap_base
-
-        rating_color = '#28A745' if row['Score'] >= 70 else '#DC3545'
         
-        st.markdown(f"""
-            <div style="background-color:#1A1A1A; padding:20px; border-radius:8px; border:1px solid #333;">
-                <h4 style="color:#888; margin:0;">{row['Ticker']}</h4>
-                <h2 style="color:white; margin:5px 0;">{row['Company']}</h2>
-                <div style="margin-top:15px; padding:10px; background-color:{rating_color}20; border-left:4px solid {rating_color};">
-                    <h1 style="color:{rating_color}; margin:0; font-size:48px;">{row['Rating']}</h1>
-                </div>
-                <p style="color:#AAA; margin-top:5px;">Base Rating: <b>{row['Base_Rating']}</b></p>
-                <hr style="border-color:#333;">
-                <p style="color:#EEE; font-size:24px; margin:5px 0;">RW: {rw_base:.0%} ➔ <span style="color:#FF4B4B">{rw_stress:.0%}</span></p>
-                <p style="color:#AAA; font-size:14px;">Capital Charge Delta: <b style="color:#FF4B4B">+${cap_delta:,.0f}</b></p>
-            </div>
-        """, unsafe_allow_html=True)
-
-        # PDF 导出逻辑
-        if st.button(f"📄 导出 {row['Ticker']} 深度研报"):
-            try:
-                pdf = FPDF()
-                pdf.add_page()
-                pdf.set_font("Arial", "B", 20)
-                pdf.cell(0, 15, f"CREDIT & CAPITAL MEMO: {row['Ticker']}", 0, 1)
-                pdf.line(10, 25, 200, 25)
-                pdf.ln(5)
-                
-                pdf.set_font("Arial", "", 12)
-                pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
-                pdf.cell(0, 10, f"Stressed Rating: {row['Rating']} (Base: {row['Base_Rating']})", 0, 1)
-                
-                pdf.set_font("Arial", "B", 14)
-                pdf.cell(0, 15, "CAPITAL IMPACT (BASEL III):", 0, 1)
-                pdf.set_font("Arial", "", 12)
-                pdf.cell(0, 8, f"Exposure: ${exposure:,.0f}", 0, 1)
-                pdf.cell(0, 8, f"Risk Weight Change: {rw_base:.0%} -> {rw_stress:.0%}", 0, 1)
-                pdf.cell(0, 8, f"Capital Charge (Base): ${cap_base:,.0f}", 0, 1)
-                pdf.set_font("Arial", "B", 12)
-                pdf.cell(0, 8, f"Capital Charge (Stressed): ${cap_stress:,.0f}", 0, 1)
-                pdf.set_text_color(255, 0, 0)
-                pdf.cell(0, 8, f"Additional Capital Required: +${cap_delta:,.0f}", 0, 1)
-                pdf.set_text_color(0, 0, 0)
-                
-                pdf.ln(10)
-                pdf.set_font("Arial", "I", 8)
-                pdf.cell(0, 10, "Generated by Global Credit Lens V26.1", 0, 1)
-                
-                pdf_bytes = bytes(pdf.output())
-                st.download_button("📥 下载 PDF", pdf_bytes, f"Capital_Memo_{row['Ticker']}.pdf", "application/pdf")
-            except: pass
-
-    with col2:
-        # RWA 瀑布图
-        fig = go.Figure(go.Waterfall(
-            name = "20", orientation = "v",
+        fig_cap = go.Figure(go.Waterfall(
+            name = "Capital", orientation = "v",
             measure = ["relative", "relative", "total"],
-            x = ["Base Capital", "Stress Impact", "Final Capital"],
+            x = ["Base Capital", "Stress Impact", "Final Required"],
             textposition = "outside",
             text = [f"${cap_base/1000:.0f}k", f"+${cap_delta/1000:.0f}k", f"${cap_stress/1000:.0f}k"],
             y = [cap_base, cap_delta, cap_stress],
-            connector = {"line":{"color":"rgb(63, 63, 63)"}},
-            increasing = {"marker":{"color":"#FF4B4B"}},
-            decreasing = {"marker":{"color":"#28A745"}},
-            totals = {"marker":{"color":"#333333"}}
+            connector = {"line":{"color":"#666"}},
+            increasing = {"marker":{"color":"#FF4B4B"}}, decreasing = {"marker":{"color":"#28A745"}}, totals = {"marker":{"color":"#EEE"}}
         ))
-        fig.update_layout(title = "压力测试下的资本损耗 (Capital Erosion)", template="plotly_dark", height=400, showlegend = False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig, use_container_width=True)
+        fig_cap.update_layout(title="Capital Erosion (USD)", template="plotly_dark", height=280, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_cap, use_container_width=True)
 
-    # 宏观 Tab 页
+    # --- 第二排：黑天鹅生存模拟 ---
     st.markdown("---")
-    st.subheader("📊 深度量化看板")
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ 全景热力", "🛁 竞争气泡", "🎻 评级分布", "🔗 归因分析", "🧠 因子筛选(IV)"])
+    st.subheader("🏴‍☠️ Black Swan Survival Test")
+    
+    swan_res = BlackSwanEngine.simulate_survival(row, swan_shock/100.0, fixed_cost_sim/100.0)
+    c_swan1, c_swan2 = st.columns([1, 2])
+    
+    with c_swan1:
+        is_alive = swan_res['Is_Survive']
+        status_color = '#28A745' if is_alive else '#FF3333'
+        status_text = "SURVIVED" if is_alive else "BANKRUPT"
+        st.markdown(f"""
+            <div style="background-color:#111; padding:20px; border: 1px solid {status_color}; border-radius: 8px; text-align:center; height: 100%;">
+                <h4 style="color:#888; margin:0;">SIMULATION RESULT</h4>
+                <h1 style="color:{status_color}; font-size:48px; margin:15px 0;">{status_text}</h1>
+                <p style="color:#AAA;">Revenue Shock: <b style="color:#FFF">-{swan_shock}%</b></p>
+                <p style="color:#AAA;">Operating Leverage Impact</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+    with c_swan2:
+        fig_swan = go.Figure(go.Waterfall(
+            name = "Survival", orientation = "v",
+            measure = ["relative", "relative", "total"],
+            x = ["Base Profit", "Shock Impact", "Final Profit"],
+            text = [f"{swan_res['Base_Profit']:.1f}", f"{swan_res['Impact']:.1f}", f"{swan_res['Final_Profit']:.1f}"],
+            y = [swan_res['Base_Profit'], swan_res['Impact'], swan_res['Final_Profit']],
+            connector = {"line":{"color":"#666"}},
+            increasing = {"marker":{"color":"#28A745"}}, decreasing = {"marker":{"color":"#FF3333"}}, totals = {"marker":{"color": "#FFF" if is_alive else "#555"}}
+        ))
+        fig_swan.update_layout(title=f"Operating Leverage Analysis (Fixed Cost Ratio: {fixed_cost_sim}%)", template="plotly_dark", height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_swan, use_container_width=True)
+
+    # --- 第三排：量化看板 ---
+    st.markdown("---")
+    tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Risk Heatmap", "🎻 Rating Dist", "🔗 Correlations", "🧠 IV Feature Selection"])
 
     with tab1:
         if not df_final.empty:
-            st.plotly_chart(px.treemap(df_final, path=[px.Constant("全市场"), 'Rating', 'Search_Label'], values='Score', color='Score', color_continuous_scale='RdYlGn', title="信用风险分布"), use_container_width=True)
+            st.plotly_chart(px.treemap(df_final, path=[px.Constant("Market"), 'Rating', 'Search_Label'], values='Score', color='Score', color_continuous_scale='RdYlGn', title="Credit Risk Heatmap"), use_container_width=True)
     with tab2:
         if not df_final.empty:
-            st.plotly_chart(px.scatter(df_final, x="Stressed_GM", y="Score", size="Debt Ratio", color="Rating", hover_name="Company", text="Company", title="盈利能力 vs 评分"), use_container_width=True)
+            st.plotly_chart(px.strip(df_final, x="Rating", y="Score", color="Rating", title="Rating Distribution"), use_container_width=True)
     with tab3:
         if not df_final.empty:
-            st.plotly_chart(px.strip(df_final, x="Rating", y="Score", color="Rating", title="评级分布"), use_container_width=True)
+            st.plotly_chart(px.imshow(df_final[['Score', 'Gross Margin', 'Overseas Ratio', 'Inventory Days', 'Debt Ratio']].corr(), text_auto=True, color_continuous_scale='RdBu_r', title="Factor Correlation Matrix"), use_container_width=True)
     with tab4:
-        if not df_final.empty:
-            st.plotly_chart(px.imshow(df_final[['Score', 'Gross Margin', 'Overseas Ratio', 'Inventory Days', 'Debt Ratio']].corr(), text_auto=True, color_continuous_scale='RdBu_r', title="因子相关性"), use_container_width=True)
-    with tab5:
-        st.markdown("### 🧬 特征重要性分析 (IV)")
+        st.markdown("#### Information Value (IV) Analysis")
         if not df_final.empty:
             target_col = 'Manual_Bad_Label' if 'Manual_Bad_Label' in df_final.columns else 'Is_Bad'
             if target_col == 'Is_Bad': df_final['Is_Bad'] = df_final['PD_Prob'].apply(lambda x: 1 if x > 0.30 else 0)
             
             iv_result = IV_Engine.calculate_iv(df_final, target_col=target_col, feature_cols=['Gross Margin', 'Debt Ratio', 'Overseas Ratio', 'Inventory Days', 'Cash Flow'])
-            iv_result['Color'] = iv_result['IV'].apply(lambda x: '#FFD700' if x > 0.3 else ('#00E5FF' if x > 0.1 else '#555555'))
-            
-            c_iv1, c_iv2 = st.columns([2, 1])
-            with c_iv1:
-                st.plotly_chart(px.bar(iv_result, x='IV', y='Feature', orientation='h', title="关键风险因子预测力 (IV)", text_auto='.3f', color='Feature', color_discrete_map={row['Feature']: row['Color'] for _, row in iv_result.iterrows()}).update_layout(template="plotly_dark", showlegend=False), use_container_width=True)
-            with c_iv2:
-                st.info("💡 **IV 标准:**\n- **>0.3**: 强因子 (金)\n- **0.1-0.3**: 有效 (蓝)\n- **<0.02**: 噪音")
-                st.dataframe(iv_result[['Feature', 'IV']], use_container_width=True)
+            iv_result['Color'] = iv_result['IV'].apply(lambda x: '#FFD700' if x > 0.3 else ('#00E5FF' if x > 0.1 else '#555'))
+            st.plotly_chart(px.bar(iv_result, x='IV', y='Feature', orientation='h', title="Predictive Power (IV)", color='Feature', color_discrete_map={row['Feature']: row['Color'] for _, row in iv_result.iterrows()}).update_layout(template="plotly_dark", showlegend=False, height=300), use_container_width=True)
 
-    # ==========================================
-    # 6. 架构图绘制 (Graphviz Integration)
-    # ==========================================
+    # --- 底部：架构图与报告 ---
     st.markdown("---")
-    st.subheader("🏗️ System Architecture (V26.1)")
-    with st.expander("点击展开系统架构图 (Architect View)", expanded=False):
-        try:
-            arch = graphviz.Digraph()
-            arch.attr(rankdir='TB', bgcolor='transparent')
-            arch.attr('node', shape='box', style='filled', fontname='Arial', color='white', fontcolor='black')
-            
-            # 1. User Layer (绿色)
-            with arch.subgraph(name='cluster_0') as c:
-                c.attr(label='Presentation Layer', color='white', fontcolor='white')
-                c.node('UI', 'Streamlit Dashboard\n(Web Interface)', fillcolor='#28A745', fontcolor='white')
-                c.node('Report', 'Smart Report Engine\n(FPDF Generator)', fillcolor='#28A745', fontcolor='white')
+    c_rep, c_arch = st.columns([1, 2])
+    
+    with c_rep:
+        if st.button(f"📄 Generate Investment Memo ({row['Ticker']})"):
+            try:
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.set_font("Arial", "B", 20)
+                pdf.cell(0, 15, f"CREDIT MEMO: {row['Ticker']}", 0, 1)
+                pdf.line(10, 25, 200, 25)
+                pdf.ln(5)
+                pdf.set_font("Arial", "", 12)
+                pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
+                pdf.cell(0, 10, f"Rating: {row['Rating']} (Score: {row['Score']})", 0, 1)
+                pdf.cell(0, 10, f"PD: {row['PD_Prob']:.2%}", 0, 1)
+                pdf.ln(5)
+                pdf.set_font("Arial", "B", 14)
+                pdf.cell(0, 10, "STRESS TEST & CAPITAL IMPACT", 0, 1)
+                pdf.set_font("Arial", "", 12)
+                pdf.cell(0, 8, f"Capital Charge Delta: +${cap_delta:,.0f}", 0, 1)
+                pdf.cell(0, 8, f"Black Swan Survival: {'YES' if is_alive else 'NO'}", 0, 1)
+                pdf.ln(10)
+                pdf.set_font("Arial", "I", 8)
+                pdf.cell(0, 10, "Generated by Global Credit Lens V26.4", 0, 1)
+                st.download_button("📥 Download PDF", bytes(pdf.output()), f"Report_{row['Ticker']}.pdf")
+            except: st.error("PDF Generation Error")
 
-            # 2. Core Layer (蓝色)
-            with arch.subgraph(name='cluster_1') as c:
-                c.attr(label='Core Computing Layer', color='white', fontcolor='white')
-                c.node('Stress', 'Stress Engine\n(5-Factor Shock)', fillcolor='#0056D2', fontcolor='white')
-                c.node('Logit', 'Scoring Engine\n(Logistic Regression)', fillcolor='#0056D2', fontcolor='white')
-                c.node('Basel', 'Capital Engine\n(Basel III RWA)', fillcolor='#0056D2', fontcolor='white')
-                c.node('Validation', 'Validation Engine\n(WOE / IV Analysis)', fillcolor='#0056D2', fontcolor='white')
-
-            # 3. Data Layer (金色)
-            with arch.subgraph(name='cluster_2') as c:
-                c.attr(label='Data Ingestion', color='white', fontcolor='white')
-                c.node('Excel', 'Excel Upload', fillcolor='#FFD700')
-                c.node('SQL', 'SQL Adapter\n(Enterprise Ready)', fillcolor='#FFD700')
-                c.node('Clean', 'Preprocessing', fillcolor='#FFD700')
-
-            arch.edge('Excel', 'Clean')
-            arch.edge('SQL', 'Clean')
-            arch.edge('Clean', 'Validation')
-            arch.edge('Clean', 'Stress')
-            arch.edge('Validation', 'Logit')
-            arch.edge('Stress', 'Logit')
-            arch.edge('Logit', 'Basel')
-            arch.edge('Basel', 'UI')
-            arch.edge('Logit', 'UI')
-            arch.edge('UI', 'Report')
-
-            st.graphviz_chart(arch)
-        except Exception as e:
-            st.error("⚠️ 架构图渲染失败。请确保已安装 Graphviz (pip install graphviz)，并且系统环境变量已配置。")
+    with c_arch:
+        with st.expander("🏗️ System Architecture (V26.4)", expanded=False):
+            st.markdown("""
+            **1. Presentation Layer:** Streamlit Dashboard, Plotly Gauge/Waterfall, FPDF Report Engine.
+            **2. Core Computing Layer:** * **Scoring:** Logit + Sigmoid + PDO Scaling (Log-Odds Calibration).
+            * **Stress:** 5-Factor Macro Shock Simulation.
+            * **Capital:** Basel III Standardized Approach RWA.
+            * **Survival:** Operating Leverage & Black Swan Engine.
+            **3. Data Layer:** Excel Feed / SQL Adapter (Ready).
+            """)
 
 if __name__ == "__main__":
     main()
