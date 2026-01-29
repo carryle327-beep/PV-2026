@@ -8,34 +8,18 @@ from fpdf import FPDF
 import io
 
 # ==========================================
-# 0. 系统配置 (V26.4 最终架构师版)
+# 0. 系统配置 (V26.5 校准修复版)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V26.4", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="Global Credit Lens V26.5", layout="wide", page_icon="🏦")
 
-# CSS 样式: 黑金/投行风
+# CSS 样式: 黑金/投行风 (优化字体清晰度)
 st.markdown("""
     <style>
-    /* 全局深色背景 */
     .stApp { background-color: #000000 !important; color: #E0E0E0; font-family: 'Segoe UI', sans-serif; }
-    
-    /* 侧边栏 */
     [data-testid="stSidebar"] { background-color: #121212 !important; border-right: 1px solid #333; }
-    
-    /* 标题与文字 */
-    h1, h2, h3 { color: #FFFFFF !important; font-weight: 600 !important; letter-spacing: 0.5px; }
-    .stMarkdown p { font-size: 14px; }
-    
-    /* 组件样式 */
+    h1, h2, h3 { color: #FFFFFF !important; font-weight: 600 !important; }
     .stMetric { background-color: #1A1A1A; border: 1px solid #333; border-left: 4px solid #0056D2; padding: 15px; border-radius: 5px; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { background-color: #1A1A1A; border-radius: 4px 4px 0 0; color: #888; border: none; }
-    .stTabs [aria-selected="true"] { background-color: #0056D2 !important; color: white !important; }
-    
-    /* 按钮样式 */
-    .stButton>button { background-color: #222; color: white; border: 1px solid #444; border-radius: 4px; transition: all 0.3s; }
-    .stButton>button:hover { border-color: #0056D2; color: #0056D2; transform: translateY(-1px); }
-    
-    /* Expander */
+    .stButton>button { background-color: #222; color: white; border: 1px solid #444; }
     .streamlit-expanderHeader { background-color: #222 !important; color: white !important; }
     </style>
 """, unsafe_allow_html=True)
@@ -67,10 +51,11 @@ class CreditEngine:
     def sigmoid(z): return 1 / (1 + np.exp(-z))
 
     @staticmethod
-    def scale_score(pd_val, base_score=600, base_odds=50, pdo=20):
+    def scale_score(pd_val, base_score=600, base_odds=20, pdo=40):
         """
-        [PDO Engine] 将概率转换为 FICO 风格分数
-        Formula: Score = Offset + Factor * ln(Odds)
+        [校准修复] 
+        1. base_odds 从 50 降为 20 (降低达到600分的门槛)
+        2. pdo 从 20 升为 40 (拉大分差，让高分更高，低分更低，增加区分度)
         """
         if pd_val >= 1.0: return 300
         if pd_val <= 0.0: return 850
@@ -84,7 +69,6 @@ class CreditEngine:
     @staticmethod
     def calculate(row, params, macro_status):
         try:
-            # 特征提取
             base_gm = float(row.get('Gross Margin', 0))       
             debt_ratio = float(row.get('Debt Ratio', 50))     
             overseas = float(row.get('Overseas Ratio', 0))    
@@ -93,7 +77,7 @@ class CreditEngine:
             cf_flag = 1 if cf > 0 else 0
         except: return pd.Series({'Score': 0, 'Rating': 'Error', 'PD_Prob': 1.0, 'Stressed_GM': 0})
 
-        # 压力传导 (Deterministic Simulation)
+        # 压力传导
         market_hit = params.get('margin_shock', 0) / 100.0
         tariff_hit = (overseas / 100.0) * params.get('tariff_shock', 0) * 100
         input_cost_hit = params.get('raw_material_shock', 0) * 0.2
@@ -102,25 +86,27 @@ class CreditEngine:
         final_gm = max(base_gm - market_hit - tariff_hit - input_cost_hit - fx_hit, -10.0)
         rate_hit = (debt_ratio / 100.0) * (params.get('rate_hike_bps', 0) / 100.0) * 5.0
 
-        # Logit 回归
-        logit_z = -0.5 + (-0.15 * final_gm) + (0.02 * inv) + (0.05 * debt_ratio) + (-1.2 * cf_flag) + rate_hit
+        # [校准修复] Logit 回归参数调整
+        # Intercept 从 -0.5 调整为 -2.0。这意味着所有人天生自带“安全分”，降低基础 PD。
+        logit_z = -2.0 + (-0.12 * final_gm) + (0.015 * inv) + (0.04 * debt_ratio) + (-1.5 * cf_flag) + rate_hit
+        
         pd_val = CreditEngine.sigmoid(logit_z)
         
         # PDO 分数校准
-        score = CreditEngine.scale_score(pd_val, base_score=600, base_odds=50, pdo=20)
+        score = CreditEngine.scale_score(pd_val, base_score=600, base_odds=20, pdo=40)
         
         # 评级映射
         if score >= 750: rating = "AA (High Grade)"
         elif score >= 700: rating = "A (Upper Medium)"
         elif score >= 650: rating = "BBB (Medium)"
-        elif score >= 600: rating = "BB (Speculative)"
+        elif score >= 580: rating = "BB (Speculative)" # 稍微降低 BB 门槛
         elif score >= 500: rating = "B (Highly Speculative)"
         else: rating = "CCC (Substantial Risk)"
         
         return pd.Series({'Stressed_GM': final_gm, 'PD_Prob': pd_val, 'Score': score, 'Rating': rating})
 
 # ==========================================
-# 3. 巴塞尔资本引擎 (Basel III RWA)
+# 3. 巴塞尔资本引擎
 # ==========================================
 class BaselEngine:
     def __init__(self):
@@ -129,7 +115,6 @@ class BaselEngine:
         self.capital_ratio = 0.08 
 
     def calculate_rwa(self, exposure, rating):
-        # 模糊匹配评级
         rw = 1.50
         for key in self.rw_map:
             if rating.startswith(key.split(' ')[0]):
@@ -140,7 +125,7 @@ class BaselEngine:
         return rw, rwa, charge
 
 # ==========================================
-# 4. 黑天鹅引擎 (Operating Leverage)
+# 4. 黑天鹅引擎
 # ==========================================
 class BlackSwanEngine:
     @staticmethod
@@ -151,7 +136,6 @@ class BlackSwanEngine:
         base_fixed_cost = base_revenue * fixed_cost_ratio 
         base_net_profit = base_revenue - base_cogs - base_fixed_cost
         
-        # 黑天鹅打击：营收下跌，固定成本不变
         new_revenue = base_revenue * (1 - shock_factor)
         new_cogs = new_revenue * (1 - gross_margin)
         new_net_profit = new_revenue - new_cogs - base_fixed_cost
@@ -164,7 +148,7 @@ class BlackSwanEngine:
         }
 
 # ==========================================
-# 5. IV 计算引擎 (Validation)
+# 5. IV 计算引擎
 # ==========================================
 class IV_Engine:
     @staticmethod
@@ -196,7 +180,7 @@ def main():
     st.sidebar.title("🎛️ 压力测试实验室")
     
     # A. 数据接入
-    st.sidebar.subheader("1. 数据接入 (Data Feed)")
+    st.sidebar.subheader("1. 数据接入")
     uploaded_file = st.sidebar.file_uploader("上传 Excel", type=['xlsx'])
     if uploaded_file: df_raw = load_data(uploaded_file)
     else:
@@ -226,12 +210,10 @@ def main():
     swan_shock = st.sidebar.slider("📉 营收瞬间蒸发 (%)", 0, 80, 40)
     fixed_cost_sim = st.sidebar.slider("🏭 假设固定成本占比 (%)", 10, 60, 25)
 
-    # D. 批量计算
+    # D. 计算
     try:
-        # 1. 压力情景
         res_stressed = df_raw.apply(lambda r: CreditEngine.calculate(r, params, "Stressed"), axis=1)
         df_final = pd.concat([df_raw, res_stressed], axis=1)
-        # 2. 基准情景 (Base Case)
         base_params = {k:0 for k in params}
         res_base = df_raw.apply(lambda r: CreditEngine.calculate(r, base_params, "Base"), axis=1)
         df_final['Base_Rating'] = res_base['Rating']
@@ -241,10 +223,10 @@ def main():
     # ==========================================
     # 前端展示层
     # ==========================================
-    st.title("GLOBAL CREDIT LENS | V26.4")
-    st.caption("Architect Edition: Logit + PDO Scaling + Basel III + Black Swan Engine")
+    st.title("GLOBAL CREDIT LENS | V26.5")
+    st.caption("Architect Edition: Calibrated Scoring + High Contrast Viz")
     
-    # 检索栏
+    # 检索
     c_search, _ = st.columns([1, 2])
     with c_search:
         selected_label = st.selectbox("🔍 穿透式检索 (Drill-down)", df_final['Search_Label'].tolist())
@@ -257,8 +239,9 @@ def main():
     
     with col1:
         st.markdown("### 🧬 Credit Profile (PDO Scaled)")
-        # 仪表盘
-        rating_color = '#28A745' if row['Score'] >= 650 else ('#FFC107' if row['Score'] >= 550 else '#DC3545')
+        
+        # 仪表盘颜色逻辑：根据分数变色
+        rating_color = '#28A745' if row['Score'] >= 650 else ('#FFC107' if row['Score'] >= 580 else '#DC3545')
         
         fig_gauge = go.Figure(go.Indicator(
             mode = "gauge+number+delta", value = row['Score'],
@@ -269,37 +252,40 @@ def main():
                 'bar': {'color': rating_color},
                 'bgcolor': "black", 'borderwidth': 2, 'bordercolor': "#333",
                 'steps': [
-                    {'range': [300, 550], 'color': '#550000'},
-                    {'range': [550, 650], 'color': '#555500'},
-                    {'range': [650, 850], 'color': '#003300'}
+                    {'range': [300, 580], 'color': '#550000'}, # 红
+                    {'range': [580, 650], 'color': '#555500'}, # 黄
+                    {'range': [650, 850], 'color': '#003300'}  # 绿
                 ],
                 'threshold': {'line': {'color': "white", 'width': 4}, 'thickness': 0.75, 'value': row['Score']}
             }
         ))
-        fig_gauge.update_layout(height=250, margin=dict(l=20,r=20,t=30,b=20), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
+        fig_gauge.update_layout(height=280, margin=dict(l=20,r=20,t=30,b=20), paper_bgcolor='rgba(0,0,0,0)', font={'color': "white"})
         st.plotly_chart(fig_gauge, use_container_width=True)
         st.metric("Current Rating", row['Rating'], delta=f"PD: {row['PD_Prob']:.2%}", delta_color="inverse")
 
     with col2:
         st.markdown("### 🏛️ Basel III Capital Impact")
-        # 资本计算
-        exposure = 10_000_000 # 默认 10M
+        exposure = 10_000_000 
         basel = BaselEngine()
         rw_base, rwa_base, cap_base = basel.calculate_rwa(exposure, row['Base_Rating'])
         rw_stress, rwa_stress, cap_stress = basel.calculate_rwa(exposure, row['Rating'])
         cap_delta = cap_stress - cap_base
         
+        # [修复] 瀑布图文字可见性：强制白色 + 加粗
         fig_cap = go.Figure(go.Waterfall(
             name = "Capital", orientation = "v",
             measure = ["relative", "relative", "total"],
             x = ["Base Capital", "Stress Impact", "Final Required"],
-            textposition = "outside",
+            textposition = "auto", # 改为 auto，防止 outside 被切掉
             text = [f"${cap_base/1000:.0f}k", f"+${cap_delta/1000:.0f}k", f"${cap_stress/1000:.0f}k"],
+            textfont = dict(color="white", size=14, family="Arial Black"), # 强制白色大字体
             y = [cap_base, cap_delta, cap_stress],
             connector = {"line":{"color":"#666"}},
             increasing = {"marker":{"color":"#FF4B4B"}}, decreasing = {"marker":{"color":"#28A745"}}, totals = {"marker":{"color":"#EEE"}}
         ))
+        # 增加 cliponaxis=False 防止文字被切
         fig_cap.update_layout(title="Capital Erosion (USD)", template="plotly_dark", height=280, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        fig_cap.update_yaxes(automargin=True)
         st.plotly_chart(fig_cap, use_container_width=True)
 
     # --- 第二排：黑天鹅生存模拟 ---
@@ -323,11 +309,14 @@ def main():
         """, unsafe_allow_html=True)
         
     with c_swan2:
+        # [修复] 瀑布图文字可见性
         fig_swan = go.Figure(go.Waterfall(
             name = "Survival", orientation = "v",
             measure = ["relative", "relative", "total"],
             x = ["Base Profit", "Shock Impact", "Final Profit"],
+            textposition = "auto",
             text = [f"{swan_res['Base_Profit']:.1f}", f"{swan_res['Impact']:.1f}", f"{swan_res['Final_Profit']:.1f}"],
+            textfont = dict(color="white", size=14, family="Arial Black"), # 强制白色大字体
             y = [swan_res['Base_Profit'], swan_res['Impact'], swan_res['Final_Profit']],
             connector = {"line":{"color":"#666"}},
             increasing = {"marker":{"color":"#28A745"}}, decreasing = {"marker":{"color":"#FF3333"}}, totals = {"marker":{"color": "#FFF" if is_alive else "#555"}}
@@ -383,19 +372,19 @@ def main():
                 pdf.cell(0, 8, f"Black Swan Survival: {'YES' if is_alive else 'NO'}", 0, 1)
                 pdf.ln(10)
                 pdf.set_font("Arial", "I", 8)
-                pdf.cell(0, 10, "Generated by Global Credit Lens V26.4", 0, 1)
+                pdf.cell(0, 10, "Generated by Global Credit Lens V26.5", 0, 1)
                 st.download_button("📥 Download PDF", bytes(pdf.output()), f"Report_{row['Ticker']}.pdf")
             except: st.error("PDF Generation Error")
 
     with c_arch:
-        with st.expander("🏗️ System Architecture (V26.4)", expanded=False):
+        with st.expander("🏗️ System Architecture (Text View)", expanded=False):
             st.markdown("""
-            **1. Presentation Layer:** Streamlit Dashboard, Plotly Gauge/Waterfall, FPDF Report Engine.
-            **2. Core Computing Layer:** * **Scoring:** Logit + Sigmoid + PDO Scaling (Log-Odds Calibration).
+            **1. Presentation Layer:** Streamlit Dashboard, High-Contrast Waterfall Charts, FPDF.
+            **2. Core Computing Layer:** * **Scoring:** Calibrated Logit (Base PD adjustment) + PDO Scaling.
             * **Stress:** 5-Factor Macro Shock Simulation.
-            * **Capital:** Basel III Standardized Approach RWA.
+            * **Capital:** Basel III Standardized Approach.
             * **Survival:** Operating Leverage & Black Swan Engine.
-            **3. Data Layer:** Excel Feed / SQL Adapter (Ready).
+            **3. Data Layer:** Excel Feed / SQL Adapter.
             """)
 
 if __name__ == "__main__":
