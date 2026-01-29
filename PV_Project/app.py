@@ -9,30 +9,38 @@ from fpdf import FPDF
 import io
 
 # ==========================================
-# 0. 系统配置 (V24.2 修复版)
+# 0. 系统配置 (V25.0 终极版)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V24.2", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="Global Credit Lens V25.0", layout="wide", page_icon="🏦")
 
-# [修复]：删除了报错的 set_option('deprecation.showPyplotGlobalUse', False)
-# 因为代码里主要用 Plotly，这行旧配置已不再需要。
-
-# CSS 样式
+# CSS 样式: 黑金/投行风
 st.markdown("""
     <style>
+    /* 全局深色背景 */
     .stApp { background-color: #000000 !important; color: #E0E0E0; font-family: 'Microsoft YaHei', sans-serif; }
+    
+    /* 侧边栏 */
     [data-testid="stSidebar"] { background-color: #121212 !important; border-right: 1px solid #333; }
+    
+    /* 标题样式 */
     h1, h2, h3 { color: #FFFFFF !important; font-weight: 700 !important; letter-spacing: 1px; }
+    
+    /* 指标卡片 */
     .stMetric { background-color: #1A1A1A; border: 1px solid #333; border-left: 4px solid #0056D2; padding: 15px; border-radius: 5px; }
+    
+    /* Tab 页签 */
     .stTabs [data-baseweb="tab-list"] { gap: 10px; }
     .stTabs [data-baseweb="tab"] { background-color: #1A1A1A; border-radius: 4px 4px 0 0; color: #888; }
     .stTabs [aria-selected="true"] { background-color: #0056D2 !important; color: white !important; }
+    
+    /* 按钮 */
     .stButton>button { background-color: #222; color: white; border: 1px solid #444; border-radius: 4px; }
     .stButton>button:hover { border-color: #0056D2; color: #0056D2; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 安全鉴权
+# 1. 安全鉴权 (Authentication)
 # ==========================================
 def check_password():
     CORRECT_PASSWORD = "HR2026"
@@ -58,7 +66,7 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 2. 缓存加速
+# 2. 缓存加速 (Caching)
 # ==========================================
 @st.cache_data
 def load_data(file):
@@ -68,48 +76,46 @@ def load_data(file):
     return df
 
 # ==========================================
-# 3. 五维计算引擎 (5-Factor Engine)
+# 3. 核心计算引擎 (Logit Engine + Stress Test)
 # ==========================================
 class CreditEngine:
     @staticmethod
     def sigmoid(z):
-        z = np.clip(z, -10, 10)
+        # [算法2] Sigmoid 激活函数：将任意 Z 值压缩到 0-1 之间作为概率
         return 1 / (1 + np.exp(-z))
 
     @staticmethod
     def calculate(row, params, macro_status):
         try:
-            base_gm = float(row.get('Gross Margin', 0))
-            debt_ratio = float(row.get('Debt Ratio', 50))
-            overseas = float(row.get('Overseas Ratio', 0))
-            inv = float(row.get('Inventory Days', 90))
-            cf = float(row.get('Cash Flow', 0))
+            # 1. 提取基础财务指标 (Features)
+            base_gm = float(row.get('Gross Margin', 0))       
+            debt_ratio = float(row.get('Debt Ratio', 50))     
+            overseas = float(row.get('Overseas Ratio', 0))    
+            inv = float(row.get('Inventory Days', 90))        # 核心因子：库存
+            cf = float(row.get('Cash Flow', 0))               # 核心因子：现金流
             cf_flag = 1 if cf > 0 else 0
         except:
             return pd.Series({'Score': 0, 'Rating': 'Error', 'PD_Prob': 1.0, 'Stressed_GM': 0})
 
-        # --- 五维压力传导逻辑 ---
+        # 2. [算法3] 五维压力测试 (Deterministic Simulation)
         
-        # 1. 行业内卷 (Margin Shock)
+        # A. 市场内卷
         market_hit = params['margin_shock'] / 100.0
-        
-        # 2. 关税冲击 (Tariff Shock)
+        # B. 关税壁垒
         tariff_hit = (overseas / 100.0) * params['tariff_shock'] * 100
-        
-        # 3. 原材料通胀 (Input Cost)
+        # C. 原材料通胀
         input_cost_hit = params['raw_material_shock'] * 0.2
-        
-        # 4. 汇率冲击 (FX Shock)
+        # D. 汇率波动
         fx_hit = (overseas / 100.0) * params['fx_shock'] 
 
-        # 计算折后毛利
+        # 中间变量：折后毛利
         final_gm = base_gm - market_hit - tariff_hit - input_cost_hit - fx_hit
-        final_gm = max(final_gm, -10.0)
+        final_gm = max(final_gm, -10.0) # 兜底逻辑
 
-        # 5. 加息冲击 (Rate Hike)
+        # E. 加息冲击 (针对高负债的惩罚)
         rate_hit = (debt_ratio / 100.0) * (params['rate_hike_bps'] / 100.0) * 5.0
 
-        # --- Logit 模型 ---
+        # 3. [算法1] Logit 评分模型 (Linear Weighting)
         intercept = -0.5
         logit_z = intercept + \
                   (-0.15 * final_gm) + \
@@ -121,7 +127,7 @@ class CreditEngine:
         pd_val = CreditEngine.sigmoid(logit_z)
         score = 100 * (1 - pd_val)
         
-        # 评级
+        # 4. 评级映射
         if score >= 85: rating = "AAA"
         elif score >= 70: rating = "AA"
         elif score >= 55: rating = "BBB"
@@ -129,17 +135,69 @@ class CreditEngine:
         else: rating = "CCC"
         
         return pd.Series({
-            'Stressed_GM': final_gm, 'PD_Prob': pd_val, 'Score': score, 'Rating': rating
+            'Stressed_GM': final_gm, 
+            'PD_Prob': pd_val, 
+            'Score': score, 
+            'Rating': rating
         })
 
 # ==========================================
-# 4. 主程序
+# 4. IV 计算引擎 (Feature Selection Engine)
+# ==========================================
+class IV_Engine:
+    @staticmethod
+    def calculate_iv(df, target_col='Is_Bad', feature_cols=[]):
+        """
+        自动计算指定特征的 IV 值，用于验证因子的预测力。
+        算法逻辑：分箱 -> 计数 -> WOE计算 -> IV汇总
+        """
+        iv_list = []
+        
+        for col in feature_cols:
+            try:
+                # 数据预处理
+                temp_df = df[[col, target_col]].copy()
+                temp_df[col] = pd.to_numeric(temp_df[col], errors='coerce').fillna(0)
+                
+                # 1. 自动分箱 (Binning) - 优先用 qcut (等频)，失败用 cut (等宽)
+                try:
+                    temp_df['bucket'] = pd.qcut(temp_df[col], q=4, duplicates='drop')
+                except:
+                    temp_df['bucket'] = pd.cut(temp_df[col], bins=4)
+                
+                # 2. 统计好坏样本 (Aggregation)
+                grouped = temp_df.groupby('bucket', observed=False)[target_col].agg(['count', 'sum'])
+                grouped['bad'] = grouped['sum']
+                grouped['good'] = grouped['count'] - grouped['sum']
+                
+                # 3. 平滑处理 (Smoothing) 防止除以0
+                total_bad = grouped['bad'].sum() + 1e-5
+                total_good = grouped['good'].sum() + 1e-5
+                
+                # 4. 计算 WOE 和 IV
+                grouped['dist_bad'] = (grouped['bad'] + 1e-5) / total_bad
+                grouped['dist_good'] = (grouped['good'] + 1e-5) / total_good
+                grouped['woe'] = np.log(grouped['dist_good'] / grouped['dist_bad'])
+                grouped['iv'] = (grouped['dist_good'] - grouped['dist_bad']) * grouped['woe']
+                
+                total_iv = grouped['iv'].sum()
+                
+                iv_list.append({'Feature': col, 'IV': total_iv})
+                
+            except Exception as e:
+                continue # 如果某列计算失败，跳过
+                
+        # 返回按 IV 降序排列的结果
+        return pd.DataFrame(iv_list).sort_values(by='IV', ascending=False)
+
+# ==========================================
+# 5. 主程序 (Main Application)
 # ==========================================
 def main():
     st.sidebar.title("🎛️ 压力测试实验室")
     
-    # --- A. 数据源 ---
-    st.sidebar.subheader("1. 数据接入")
+    # --- A. 数据接入 ---
+    st.sidebar.subheader("1. 数据接入 (Data Feed)")
     uploaded_file = st.sidebar.file_uploader("上传 Excel", type=['xlsx'])
     
     if uploaded_file is not None:
@@ -149,12 +207,16 @@ def main():
         except: return
     else:
         st.sidebar.info("使用演示数据...")
+        # 演示数据
         df_raw = pd.DataFrame([
             {'Ticker': '600438', 'Company': '通威股份', 'Gross Margin': 28.5, 'Overseas Ratio': 25.0, 'Inventory Days': 85, 'Debt Ratio': 55.0, 'Cash Flow': 1},
-            {'Ticker': '300750', 'Company': '宁德时代', 'Gross Margin': 22.0, 'Overseas Ratio': 35.0, 'Inventory Days': 70, 'Debt Ratio': 45.0, 'Cash Flow': 1}
+            {'Ticker': '300750', 'Company': '宁德时代', 'Gross Margin': 22.0, 'Overseas Ratio': 35.0, 'Inventory Days': 70, 'Debt Ratio': 45.0, 'Cash Flow': 1},
+            {'Ticker': '601012', 'Company': '隆基绿能', 'Gross Margin': 18.0, 'Overseas Ratio': 45.0, 'Inventory Days': 95, 'Debt Ratio': 50.0, 'Cash Flow': 1},
+            {'Ticker': '688599', 'Company': '天合光能', 'Gross Margin': 16.0, 'Overseas Ratio': 60.0, 'Inventory Days': 80, 'Debt Ratio': 65.0, 'Cash Flow': 1},
+            {'Ticker': '002459', 'Company': '晶澳科技', 'Gross Margin': 15.5, 'Overseas Ratio': 55.0, 'Inventory Days': 88, 'Debt Ratio': 60.0, 'Cash Flow': 0}
         ])
 
-    # --- B. 五维压力参数 (5 Factors) ---
+    # --- B. 五维压力参数 ---
     st.sidebar.markdown("---")
     st.sidebar.subheader("2. 宏观压力参数 (5 Factors)")
     
@@ -181,18 +243,20 @@ def main():
         'fx_shock': fx_shock
     }
 
-    # --- 计算 ---
+    # --- C. 批量计算 ---
     try:
         res = df_raw.apply(lambda r: CreditEngine.calculate(r, params, "衰退期"), axis=1)
         df_final = pd.concat([df_raw, res], axis=1)
         df_final['Search_Label'] = df_final['Ticker'] + " | " + df_final['Company']
     except: return
 
-    # --- 界面 ---
-    st.title("GLOBAL CREDIT LENS | V24.2")
-    st.caption(f"模型状态: 五维全量压力测试 (5-Factor Stress Model) | 修复版")
+    # ==========================================
+    # 前端展示层 (Visualization Layer)
+    # ==========================================
+    st.title("GLOBAL CREDIT LENS | V25.0")
+    st.caption(f"架构: Logit + 5-Factor Stress + IV Analysis | 样本: {len(df_final)}")
     
-    # 搜索
+    # 1. 穿透式检索
     search_list = df_final['Search_Label'].tolist()
     c_search, c_blank = st.columns([1, 2])
     with c_search:
@@ -201,7 +265,7 @@ def main():
     selected_ticker = selected_label.split(" | ")[0]
     row = df_final[df_final['Ticker'] == selected_ticker].iloc[0]
 
-    # 单体
+    # 2. 单体画像卡片
     col1, col2 = st.columns([1, 2])
     with col1:
         rating_color = '#28A745' if row['Score'] >= 70 else '#DC3545'
@@ -218,7 +282,7 @@ def main():
         
         st.write("")
         
-        # PDF 导出 (包含 5 个参数)
+        # PDF 报告生成
         if st.button(f"📄 导出 {row['Ticker']} 研报"):
             try:
                 pdf = FPDF()
@@ -246,7 +310,7 @@ def main():
                 
                 pdf.ln(10)
                 pdf.set_font("Arial", "I", 10)
-                pdf.cell(0, 10, "Note: Automated by Global Credit Lens V24.2", 0, 1)
+                pdf.cell(0, 10, "Note: Generated by Global Credit Lens V25.0", 0, 1)
                 
                 pdf_bytes = bytes(pdf.output())
                 st.download_button("📥 下载 PDF", pdf_bytes, f"Report_{row['Ticker']}.pdf", "application/pdf")
@@ -254,7 +318,7 @@ def main():
                 st.error(f"导出失败: {e}")
 
     with col2:
-        # 雷达图
+        # 五维雷达图
         categories = ['综合评分', '毛利抗压', '负债健康', '现金流', '库存周转']
         def normalize(val, max_val): return min(max(val, 0), max_val) / max_val * 100
         
@@ -281,44 +345,97 @@ def main():
         fig.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
             template="plotly_dark", height=320, 
-            title=f"{row['Company']} 五维雷达",
+            title=f"{row['Company']} 五维健康度雷达",
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             margin=dict(l=40, r=40, t=40, b=20)
         )
         st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("📊 深度量化看板")
-    tab1, tab2, tab3, tab4 = st.tabs(["全景热力", "竞争气泡", "评级分布", "因子归因"])
+
+    # ==========================================
+    # 宏观看板：全市场 + 因子分析
+    # ==========================================
+    st.subheader("📊 深度量化看板 (Portfolio Analytics)")
     
+    # 包含 5 个 Tab：热力图、气泡图、分布、相关性、IV筛选
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ 全景热力图", "🛁 竞争格局", "🎻 评级分布", "🔗 归因分析", "🧠 因子筛选(IV)"])
+
+    # 1. 热力图
     with tab1:
         if not df_final.empty:
             fig_map = px.treemap(df_final, path=[px.Constant("全市场"), 'Rating', 'Search_Label'], values='Score',
-                                 color='Score', color_continuous_scale='RdYlGn')
-            fig_map.update_layout(template="plotly_dark", height=450, paper_bgcolor='rgba(0,0,0,0)')
+                                 color='Score', color_continuous_scale='RdYlGn', title="信用风险分布热力图")
+            fig_map.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_map, use_container_width=True)
-            
+
+    # 2. 气泡图
     with tab2:
         if not df_final.empty:
             fig_bub = px.scatter(df_final, x="Stressed_GM", y="Score", size="Debt Ratio", color="Rating",
-                                 hover_name="Company", text="Company",
+                                 hover_name="Company", text="Company", title="盈利能力 vs 信用评分",
                                  color_discrete_sequence=px.colors.qualitative.Bold)
-            fig_bub.update_layout(template="plotly_dark", height=450, paper_bgcolor='rgba(0,0,0,0)')
+            fig_bub.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_bub, use_container_width=True)
-
+    
+    # 3. 分布图
     with tab3:
         if not df_final.empty:
-            fig_vio = px.strip(df_final, x="Rating", y="Score", color="Rating")
-            fig_vio.update_layout(template="plotly_dark", height=450, paper_bgcolor='rgba(0,0,0,0)')
+            fig_vio = px.strip(df_final, x="Rating", y="Score", color="Rating", title="信用评级分布")
+            fig_vio.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_vio, use_container_width=True)
-
+    
+    # 4. 相关性
     with tab4:
         if not df_final.empty:
             cols_to_corr = ['Score', 'Gross Margin', 'Overseas Ratio', 'Inventory Days', 'Debt Ratio']
             corr_matrix = df_final[cols_to_corr].corr()
-            fig_corr = px.imshow(corr_matrix, text_auto=True, aspect="auto", color_continuous_scale='RdBu_r')
-            fig_corr.update_layout(template="plotly_dark", height=450, paper_bgcolor='rgba(0,0,0,0)')
+            fig_corr = px.imshow(corr_matrix, text_auto=True, aspect="auto", color_continuous_scale='RdBu_r', title="风险因子相关性")
+            fig_corr.update_layout(template="plotly_dark", height=500, paper_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_corr, use_container_width=True)
+
+    # 5. IV 因子筛选 (核心升级功能)
+    with tab5:
+        st.markdown("### 🧬 特征重要性分析 (Information Value)")
+        st.caption("Auto-calculated using WOE/IV Engine. Identifies top predictive factors.")
+        
+        if not df_final.empty:
+            # =================================================
+            # 核心逻辑：Ground Truth (真实标签) vs Proxy (影子标签)
+            # =================================================
+            if 'Manual_Bad_Label' in df_final.columns:
+                st.success("✅ 检测到人工标注的真实违约数据 (Ground Truth)，正在计算真实 IV...")
+                target_col = 'Manual_Bad_Label'
+            else:
+                st.warning("⚠️ 未检测到真实违约标签，正在使用模型预测值 (Proxy Label) 进行逻辑自洽性验证...")
+                # 影子变量逻辑：假设 PD > 30% 为高风险
+                df_final['Is_Bad'] = df_final['PD_Prob'].apply(lambda x: 1 if x > 0.30 else 0)
+                target_col = 'Is_Bad'
+            
+            # 定义需要分析的因子
+            feature_cols = ['Gross Margin', 'Debt Ratio', 'Overseas Ratio', 'Inventory Days', 'Cash Flow']
+            
+            # 调用引擎
+            iv_result = IV_Engine.calculate_iv(df_final, target_col=target_col, feature_cols=feature_cols)
+            
+            c_iv1, c_iv2 = st.columns([2, 1])
+            with c_iv1:
+                # 动态着色：强因子(>0.3)显示金色，中等显示蓝色
+                iv_result['Color'] = iv_result['IV'].apply(lambda x: '#FFD700' if x > 0.3 else ('#00E5FF' if x > 0.1 else '#555555'))
+                
+                fig_iv = px.bar(iv_result, x='IV', y='Feature', orientation='h', 
+                                title="关键风险因子预测力排行 (IV Value)",
+                                text_auto='.3f',
+                                color='Feature', 
+                                color_discrete_map={row['Feature']: row['Color'] for _, row in iv_result.iterrows()})
+                
+                fig_iv.update_layout(template="plotly_dark", height=400, showlegend=False,
+                                     xaxis_title="Information Value (IV)", yaxis_title="Risk Factors")
+                st.plotly_chart(fig_iv, use_container_width=True)
+            
+            with c_iv2:
+                st.info("💡 **IV 阈值标准:**\n\n- **> 0.3 (Gold)**: Strong Predictor (核心因子)\n- **0.1 - 0.3**: Medium Predictor (有效因子)\n- **< 0.02**: Useless (噪音)")
+                st.dataframe(iv_result[['Feature', 'IV']], use_container_width=True)
 
 if __name__ == "__main__":
     main()
