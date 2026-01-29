@@ -9,11 +9,11 @@ from fpdf import FPDF
 import io
 
 # ==========================================
-# 0. 系统配置 (V25.1 智能报告版)
+# 0. 系统配置 (V26.0 RWA Capital Edition)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V25.1", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="Global Credit Lens V26.0", layout="wide", page_icon="🏦")
 
-# CSS 样式
+# CSS 样式: 黑金/投行风
 st.markdown("""
     <style>
     .stApp { background-color: #000000 !important; color: #E0E0E0; font-family: 'Microsoft YaHei', sans-serif; }
@@ -29,7 +29,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 安全鉴权
+# 1. 鉴权 & 数据加载
 # ==========================================
 def check_password():
     CORRECT_PASSWORD = "HR2026"
@@ -40,9 +40,6 @@ def check_password():
 
 if not check_password(): st.stop()
 
-# ==========================================
-# 2. 缓存加速
-# ==========================================
 @st.cache_data
 def load_data(file):
     df = pd.read_excel(file)
@@ -51,7 +48,7 @@ def load_data(file):
     return df
 
 # ==========================================
-# 3. 核心计算引擎 (Logit + Stress)
+# 2. 核心计算引擎 (Logit + Stress)
 # ==========================================
 class CreditEngine:
     @staticmethod
@@ -92,6 +89,32 @@ class CreditEngine:
         return pd.Series({'Stressed_GM': final_gm, 'PD_Prob': pd_val, 'Score': score, 'Rating': rating})
 
 # ==========================================
+# 3. [新增] 巴塞尔资本引擎 (Basel III RWA)
+# ==========================================
+class BaselEngine:
+    """
+    巴塞尔协议 III 标准法资本计算器
+    """
+    def __init__(self):
+        # 风险权重映射表 (Standardized Approach)
+        self.rw_map = {
+            'AAA': 0.20, 'AA': 0.20,
+            'A': 0.50, 'BBB': 1.00,
+            'BB': 1.00, 'B': 1.50,
+            'CCC': 1.50, 'CC': 2.50, 'C': 2.50
+        }
+        self.capital_ratio = 0.08 # 最低资本充足率 8%
+
+    def calculate_rwa(self, exposure, rating):
+        # 1. 查找风险权重 (Risk Weight)
+        rw = self.rw_map.get(rating, 1.50) # 默认高风险
+        # 2. 计算 RWA
+        rwa = exposure * rw
+        # 3. 计算资本占用 (Capital Charge)
+        charge = rwa * self.capital_ratio
+        return rw, rwa, charge
+
+# ==========================================
 # 4. IV 计算引擎
 # ==========================================
 class IV_Engine:
@@ -126,7 +149,7 @@ def main():
     st.sidebar.title("🎛️ 压力测试实验室")
     
     # A. 数据接入
-    st.sidebar.subheader("1. 数据接入 (Data Feed)")
+    st.sidebar.subheader("1. 数据接入")
     uploaded_file = st.sidebar.file_uploader("上传 Excel", type=['xlsx'])
     if uploaded_file: df_raw = load_data(uploaded_file)
     else:
@@ -138,7 +161,7 @@ def main():
             {'Ticker': '002459', 'Company': '晶澳科技', 'Gross Margin': 15.5, 'Overseas Ratio': 55.0, 'Inventory Days': 88, 'Debt Ratio': 60.0, 'Cash Flow': 0}
         ])
 
-    # B. 参数
+    # B. 压力参数
     st.sidebar.markdown("---")
     st.sidebar.subheader("2. 宏观压力参数")
     params = {
@@ -149,16 +172,23 @@ def main():
         'fx_shock': st.sidebar.slider("5. 汇率风险 (%)", 0, 20, 5)
     }
 
-    # C. 计算
+    # C. 计算 (双重计算：Base vs Stressed)
     try:
-        res = df_raw.apply(lambda r: CreditEngine.calculate(r, params, "Stressed"), axis=1)
-        df_final = pd.concat([df_raw, res], axis=1)
+        # 1. 压力环境 (Stressed)
+        res_stressed = df_raw.apply(lambda r: CreditEngine.calculate(r, params, "Stressed"), axis=1)
+        df_final = pd.concat([df_raw, res_stressed], axis=1)
+        
+        # 2. 基准环境 (Base Case - 所有参数归零)
+        base_params = {k:0 for k in params}
+        res_base = df_raw.apply(lambda r: CreditEngine.calculate(r, base_params, "Base"), axis=1)
+        df_final['Base_Rating'] = res_base['Rating'] # 保存基准评级用于对比
+        
         df_final['Search_Label'] = df_final['Ticker'] + " | " + df_final['Company']
     except: return
 
-    # D. 界面
-    st.title("GLOBAL CREDIT LENS | V25.1")
-    st.caption(f"架构: Logit + Stress Test + IV Analysis + Smart Report")
+    # D. 界面展示
+    st.title("GLOBAL CREDIT LENS | V26.0 (RWA Edition)")
+    st.caption(f"架构: Logit + Stress Test + Basel III RWA Engine")
     
     # 检索
     c_search, _ = st.columns([1, 2])
@@ -168,10 +198,24 @@ def main():
     selected_ticker = selected_label.split(" | ")[0]
     row = df_final[df_final['Ticker'] == selected_ticker].iloc[0]
 
-    # 单体画像
+    # --- 核心更新：资本画像卡片 ---
     col1, col2 = st.columns([1, 2])
     with col1:
+        # 假设贷款敞口 (模拟输入)
+        exposure = st.number_input("💰 假设贷款敞口 (Exposure, USD)", value=10_000_000, step=1_000_000)
+        
+        # 调用 Basel 引擎
+        basel = BaselEngine()
+        # 计算压力前 (Base)
+        rw_base, rwa_base, cap_base = basel.calculate_rwa(exposure, row['Base_Rating'])
+        # 计算压力后 (Stressed)
+        rw_stress, rwa_stress, cap_stress = basel.calculate_rwa(exposure, row['Rating'])
+        
+        cap_delta = cap_stress - cap_base
+
+        # 动态颜色
         rating_color = '#28A745' if row['Score'] >= 70 else '#DC3545'
+        
         st.markdown(f"""
             <div style="background-color:#1A1A1A; padding:20px; border-radius:8px; border:1px solid #333;">
                 <h4 style="color:#888; margin:0;">{row['Ticker']}</h4>
@@ -179,129 +223,72 @@ def main():
                 <div style="margin-top:15px; padding:10px; background-color:{rating_color}20; border-left:4px solid {rating_color};">
                     <h1 style="color:{rating_color}; margin:0; font-size:48px;">{row['Rating']}</h1>
                 </div>
-                <p style="color:#AAA; margin-top:10px;">Score: <b>{row['Score']:.1f}</b> | PD: <b>{row['PD_Prob']:.2%}</b></p>
+                <p style="color:#AAA; margin-top:5px;">Base Rating (No Stress): <b>{row['Base_Rating']}</b></p>
+                <hr style="border-color:#333;">
+                <h4 style="color:#FFD700; margin:0;">🏛️ BASEL III CAPITAL</h4>
+                <p style="color:#EEE; font-size:24px; margin:5px 0;">RW: {rw_base:.0%} ➔ <span style="color:#FF4B4B">{rw_stress:.0%}</span></p>
+                <p style="color:#AAA; font-size:14px;">Capital Charge Delta: <b style="color:#FF4B4B">+${cap_delta:,.0f}</b></p>
             </div>
         """, unsafe_allow_html=True)
-        
-        st.write("")
-        
-        # ==========================================
-        # 核心升级：V25.1 智能 PDF 报告生成引擎
-        # ==========================================
-        if st.button(f"📄 导出 {row['Ticker']} 深度研报"):
-            try:
-                # 1. 准备数据
-                # 计算“基准情况” (无压力) 用于对比敏感性
-                base_params = {k: 0 for k in params}
-                base_res = CreditEngine.calculate(row, base_params, "Base")
-                base_pd = base_res['PD_Prob']
-                
-                # 计算行业平均分用于对标
-                avg_score = df_final['Score'].mean()
-                
-                # 智能建议逻辑
-                if row['Score'] >= 80: action = "OUTPERFORM / BUY"
-                elif row['Score'] >= 60: action = "NEUTRAL / HOLD"
-                else: action = "UNDERPERFORM / SELL - REDUCE EXPOSURE"
 
-                # 2. 生成 PDF (全英文投行格式)
+        if st.button(f"📄 导出 {row['Ticker']} 深度研报"):
+             # PDF 逻辑 (简化版，包含 RWA)
+            try:
                 pdf = FPDF()
                 pdf.add_page()
-                
-                # Header
                 pdf.set_font("Arial", "B", 20)
-                pdf.cell(0, 15, f"CREDIT MEMO: {row['Ticker']}", 0, 1)
-                pdf.set_font("Arial", "", 10)
-                pdf.cell(0, 8, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M')}", 0, 1)
-                pdf.line(10, 35, 200, 35)
-                pdf.ln(5)
-
-                # Section 1: Executive Summary
-                pdf.set_font("Arial", "B", 12)
-                pdf.cell(0, 10, "1. EXECUTIVE SUMMARY", 0, 1)
-                pdf.set_font("Arial", "", 10)
-                pdf.cell(0, 6, f"Rating: {row['Rating']} (Score: {row['Score']:.1f} / 100)", 0, 1)
-                pdf.cell(0, 6, f"Industry Average Score: {avg_score:.1f}", 0, 1)
-                pdf.set_font("Arial", "B", 10)
-                pdf.cell(0, 6, f"Action Suggestion: {action}", 0, 1)
-                pdf.ln(5)
-
-                # Section 2: Sensitivity Analysis (Pre vs Post Stress)
-                pdf.set_font("Arial", "B", 12)
-                pdf.cell(0, 10, "2. SENSITIVITY ANALYSIS (STRESS TEST)", 0, 1)
-                pdf.set_font("Arial", "", 10)
-                pdf.cell(90, 8, f"Base Case PD (No Stress):", 1)
-                pdf.cell(90, 8, f"{base_pd:.2%}", 1, 1)
-                pdf.set_font("Arial", "B", 10)
-                pdf.cell(90, 8, f"Stressed PD (Current Scenario):", 1)
-                pdf.cell(90, 8, f"{row['PD_Prob']:.2%}", 1, 1)
+                pdf.cell(0, 15, f"CREDIT & CAPITAL MEMO: {row['Ticker']}", 0, 1)
+                pdf.line(10, 25, 200, 25)
                 pdf.ln(5)
                 
-                # Section 3: Financial Snapshot (The 5 Core Factors)
-                pdf.set_font("Arial", "B", 12)
-                pdf.cell(0, 10, "3. FINANCIAL HEALTH SNAPSHOT (INPUTS)", 0, 1)
-                pdf.set_font("Arial", "", 10)
-                headers = ["Metric", "Value", "Risk Logic"]
-                metrics = [
-                    ("Gross Margin", f"{row.get('Gross Margin',0)}%", "Profitability (Survival)"),
-                    ("Debt Ratio", f"{row.get('Debt Ratio',0)}%", "Solvency (Rate Sensitivity)"),
-                    ("Inventory Days", f"{row.get('Inventory Days',0)} days", "Efficiency (Asset Impairment)"),
-                    ("Overseas Ratio", f"{row.get('Overseas Ratio',0)}%", "Exposure (Tariff/FX Risk)"),
-                    ("Cash Flow", "Positive" if row.get('Cash Flow',0)>0 else "Negative", "Liquidity (Lifeline)")
-                ]
-                # Table Header
-                pdf.set_fill_color(240, 240, 240)
-                pdf.cell(50, 8, headers[0], 1, 0, 'C', True)
-                pdf.cell(40, 8, headers[1], 1, 0, 'C', True)
-                pdf.cell(90, 8, headers[2], 1, 1, 'C', True)
-                # Table Body
-                for m, v, l in metrics:
-                    pdf.cell(50, 8, m, 1)
-                    pdf.cell(40, 8, v, 1)
-                    pdf.cell(90, 8, l, 1, 1)
-                pdf.ln(5)
-
-                # Section 4: Stress Parameters
-                pdf.set_font("Arial", "B", 12)
-                pdf.cell(0, 10, "4. STRESS SCENARIO PARAMETERS", 0, 1)
-                pdf.set_font("Arial", "", 9)
-                pdf.cell(0, 6, f"- Margin Shock: -{params['margin_shock']} bps", 0, 1)
-                pdf.cell(0, 6, f"- Tariff Shock: -{params['tariff_shock']*100:.0f}%", 0, 1)
-                pdf.cell(0, 6, f"- Rate Hike: +{params['rate_hike_bps']} bps", 0, 1)
-                pdf.cell(0, 6, f"- Input Cost Inflation: +{params['raw_material_shock']}%", 0, 1)
-                pdf.cell(0, 6, f"- FX Depreciation: -{params['fx_shock']}%", 0, 1)
+                pdf.set_font("Arial", "", 12)
+                pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
+                pdf.cell(0, 10, f"Stressed Rating: {row['Rating']} (Base: {row['Base_Rating']})", 0, 1)
                 
-                pdf.ln(5)
+                pdf.set_font("Arial", "B", 14)
+                pdf.cell(0, 15, "CAPITAL IMPACT (BASEL III):", 0, 1)
+                pdf.set_font("Arial", "", 12)
+                pdf.cell(0, 8, f"Exposure: ${exposure:,.0f}", 0, 1)
+                pdf.cell(0, 8, f"Risk Weight Change: {rw_base:.0%} -> {rw_stress:.0%}", 0, 1)
+                pdf.cell(0, 8, f"Capital Charge (Base): ${cap_base:,.0f}", 0, 1)
+                pdf.set_font("Arial", "B", 12)
+                pdf.cell(0, 8, f"Capital Charge (Stressed): ${cap_stress:,.0f}", 0, 1)
+                pdf.set_text_color(255, 0, 0)
+                pdf.cell(0, 8, f"Additional Capital Required: +${cap_delta:,.0f}", 0, 1)
+                pdf.set_text_color(0, 0, 0)
+                
+                pdf.ln(10)
                 pdf.set_font("Arial", "I", 8)
-                pdf.cell(0, 10, "Note: Automated by Global Credit Lens V25.1. Strictly for internal review.", 0, 1)
+                pdf.cell(0, 10, "Generated by Global Credit Lens V26.0 (RWA Edition)", 0, 1)
                 
                 pdf_bytes = bytes(pdf.output())
-                st.download_button("📥 下载深度研报 (PDF)", pdf_bytes, f"Credit_Memo_{row['Ticker']}.pdf", "application/pdf")
-            except Exception as e:
-                st.error(f"导出失败: {e}")
+                st.download_button("📥 下载含 RWA 研报", pdf_bytes, f"Capital_Memo_{row['Ticker']}.pdf", "application/pdf")
+            except: pass
 
     with col2:
-        # 雷达图
-        categories = ['综合评分', '毛利抗压', '负债健康', '现金流', '库存周转']
-        def normalize(val, max_val): return min(max(val, 0), max_val) / max_val * 100
-        
-        row_vals = [
-            row['Score'], normalize(row['Stressed_GM'] + 10, 50), normalize(100 - row['Debt Ratio'], 100),
-            100 if row['Cash Flow'] > 0 else 20, normalize(365 - row['Inventory Days'], 365)
-        ]
-        avg_vals = [
-            df_final['Score'].mean(), normalize(df_final['Stressed_GM'].mean() + 10, 50),
-            normalize(100 - df_final['Debt Ratio'].mean(), 100), 60, normalize(365 - df_final['Inventory Days'].mean(), 365)
-        ]
+        # RWA 瀑布图 (Waterfall Chart) - 最适合展示资金变化
+        fig = go.Figure(go.Waterfall(
+            name = "20", orientation = "v",
+            measure = ["relative", "relative", "total"],
+            x = ["Base Capital", "Stress Impact", "Final Capital"],
+            textposition = "outside",
+            text = [f"${cap_base/1000:.0f}k", f"+${cap_delta/1000:.0f}k", f"${cap_stress/1000:.0f}k"],
+            y = [cap_base, cap_delta, cap_stress],
+            connector = {"line":{"color":"rgb(63, 63, 63)"}},
+            increasing = {"marker":{"color":"#FF4B4B"}}, # 红色表示资本占用增加(坏事)
+            decreasing = {"marker":{"color":"#28A745"}},
+            totals = {"marker":{"color":"#333333"}}
+        ))
 
-        fig = go.Figure()
-        fig.add_trace(go.Scatterpolar(r=avg_vals, theta=categories, fill='toself', name='行业平均', line_color='#444'))
-        fig.add_trace(go.Scatterpolar(r=row_vals, theta=categories, fill='toself', name=row['Company'], line_color='#00E5FF'))
-        fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), template="plotly_dark", height=320, 
-                          title=f"{row['Company']} 五维雷达", paper_bgcolor='rgba(0,0,0,0)', margin=dict(l=40, r=40, t=40, b=20))
+        fig.update_layout(
+            title = "压力测试下的资本损耗 (Capital Erosion)",
+            template="plotly_dark", height=400,
+            showlegend = False,
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+        )
         st.plotly_chart(fig, use_container_width=True)
 
-    # 宏观看板
+    # 宏观 Tab 页
     st.markdown("---")
     st.subheader("📊 深度量化看板")
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ 全景热力", "🛁 竞争气泡", "🎻 评级分布", "🔗 归因分析", "🧠 因子筛选(IV)"])
@@ -336,4 +323,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
