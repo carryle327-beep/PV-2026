@@ -6,4 +6,5 @@ akshare
 fpdf2
 numpy
 matplotlib
+graphviz
 
