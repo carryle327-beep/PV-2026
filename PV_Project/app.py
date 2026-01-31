@@ -8,9 +8,9 @@ from fpdf import FPDF
 import io
 
 # ==========================================
-# 0. 系统配置 (V30.2 完整回归版)
+# 0. 系统配置 (V31.0 Integrity Edition)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V30.2", layout="wide", page_icon="🦅")
+st.set_page_config(page_title="Global Credit Lens V31.0", layout="wide", page_icon="🦅")
 
 st.markdown("""
     <style>
@@ -18,7 +18,7 @@ st.markdown("""
     [data-testid="stSidebar"] { background-color: #111 !important; border-right: 1px solid #333; }
     h1, h2, h3 { color: #FFFFFF !important; font-weight: 600 !important; }
     .stMetric { background-color: #0F0F0F; border: 1px solid #333; padding: 10px; border-radius: 0px; border-left: 3px solid #FFD700; }
-    .stButton>button { background-color: #222; color: #FFD700; border: 1px solid #FFD700; border-radius: 0px; font-weight: bold; }
+    .stButton>button { background-color: #222; color: #FFD700; border: 1px solid #FFD700; border-radius: 0px; font-weight: bold; width: 100%; }
     .stButton>button:hover { background-color: #FFD700; color: #000; }
     .streamlit-expanderHeader { background-color: #222 !important; color: #FFF !important; }
     </style>
@@ -44,7 +44,7 @@ def load_data(file):
     return df
 
 # ==========================================
-# 2. 核心计算引擎 (带校准参数)
+# 2. 核心计算引擎 (Logit + PDO)
 # ==========================================
 class CreditEngine:
     @staticmethod
@@ -81,7 +81,6 @@ class CreditEngine:
 
         logit_z = calibration_intercept + (-0.12 * final_gm) + (0.015 * inv) + (0.04 * debt_ratio) + (-1.5 * cf_flag) + rate_hit
         pd_val = CreditEngine.sigmoid(logit_z)
-        
         score = CreditEngine.scale_score(pd_val, base_score=600, base_odds=20, pdo=40)
         
         if score >= 750: rating = "AA"
@@ -94,7 +93,7 @@ class CreditEngine:
         return pd.Series({'Stressed_GM': final_gm, 'PD_Prob': pd_val, 'Score': score, 'Rating': rating})
 
 # ==========================================
-# 3. 交易引擎
+# 3. 交易引擎 (CDS Alpha)
 # ==========================================
 class TradingEngine:
     def __init__(self, recovery_rate=0.40):
@@ -124,7 +123,33 @@ class TradingEngine:
         return fair_spread, signal, desc, color, diff
 
 # ==========================================
-# 4. 辅助引擎
+# 4. NLP 舆情引擎
+# ==========================================
+class SentimentEngine:
+    @staticmethod
+    def analyze_news(ticker):
+        # 模拟数据
+        news_db = {
+            '300750': [("Reuters", "CATL partners with Ford in US", "Positive"), ("Caixin", "Battery material costs drop", "Positive")],
+            '601012': [("WSJ", "Longi modules detained by customs", "Negative"), ("Analyst", "Oversupply warning", "Negative")]
+        }
+        default_news = [("AI Feed", "No major sentiment shift detected", "Neutral")]
+        news_list = news_db.get(ticker, default_news)
+        
+        score = 0
+        for _, _, sentiment in news_list:
+            if sentiment == "Positive": score += 10
+            elif sentiment == "Negative": score -= 10
+        final_score = max(-100, min(100, score * 5))
+        
+        if final_score > 20: label = "Bullish"
+        elif final_score < -20: label = "Bearish"
+        else: label = "Neutral"
+        
+        return news_list, final_score, label
+
+# ==========================================
+# 5. 辅助引擎 (Basel, Swan, MLOps, IV)
 # ==========================================
 class BaselEngine:
     def __init__(self):
@@ -160,9 +185,6 @@ class ModelMonitor:
             return np.sum((a_p - e_p) * np.log(a_p / e_p))
         except: return 0.0
 
-# ==========================================
-# 5. IV 计算引擎 (Validation)
-# ==========================================
 class IV_Engine:
     @staticmethod
     def calculate_iv(df, target_col='Is_Bad', feature_cols=[]):
@@ -187,11 +209,67 @@ class IV_Engine:
         return pd.DataFrame(iv_list).sort_values(by='IV', ascending=False)
 
 # ==========================================
-# 6. 主程序
+# 6. PDF 生成器 (独立函数)
+# ==========================================
+def generate_pdf_report(row, signal, fair_spread, market_spread, diff, cap_stress, swan, sent_score, sent_label, news_list):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Header
+    pdf.set_font("Arial", "B", 18)
+    pdf.cell(0, 10, f"INSTITUTIONAL MEMO: {row['Ticker']}", 0, 1)
+    pdf.set_font("Arial", "", 10)
+    pdf.cell(0, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | System: Global Credit Lens V31.0", 0, 1)
+    pdf.line(10, 25, 200, 25)
+    pdf.ln(5)
+    
+    # 1. Executive Summary
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "1. EXECUTIVE SUMMARY", 0, 1)
+    pdf.set_font("Arial", "", 11)
+    pdf.cell(0, 8, f"Target: {row['Company']}", 0, 1)
+    pdf.cell(0, 8, f"Rating: {row['Rating']} (Score: {row['Score']})", 0, 1)
+    pdf.cell(0, 8, f"Alpha Signal: {signal}", 0, 1)
+    pdf.ln(5)
+
+    # 2. Trading Analytics
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "2. ALPHA TRADING DESK", 0, 1)
+    pdf.set_font("Arial", "", 11)
+    pdf.cell(0, 8, f"Market CDS Spread: {market_spread:.0f} bps", 0, 1)
+    pdf.cell(0, 8, f"Model Fair Value: {fair_spread:.0f} bps", 0, 1)
+    pdf.set_text_color(220, 53, 69) if diff > 50 else (pdf.set_text_color(40, 167, 69) if diff < -50 else pdf.set_text_color(0, 0, 0))
+    pdf.cell(0, 8, f"Arbitrage Gap: {diff:.0f} bps", 0, 1)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(5)
+
+    # 3. Sentiment Radar
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "3. SENTIMENT RADAR (NLP)", 0, 1)
+    pdf.set_font("Arial", "", 11)
+    pdf.cell(0, 8, f"Sentiment Score: {sent_score} ({sent_label})", 0, 1)
+    pdf.cell(0, 8, "Latest Headlines:", 0, 1)
+    pdf.set_font("Arial", "I", 9)
+    for src, title, tag in news_list:
+        pdf.cell(0, 6, f"  - [{src}] {title} ({tag})", 0, 1)
+    pdf.ln(5)
+    
+    # 4. Risk & Capital
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "4. RISK & CAPITAL", 0, 1)
+    pdf.set_font("Arial", "", 11)
+    pdf.cell(0, 8, f"Basel III Capital Charge: ${cap_stress:,.0f}", 0, 1)
+    pdf.cell(0, 8, f"Black Swan Survival: {'YES' if swan['Is_Survive'] else 'NO'}", 0, 1)
+
+    return bytes(pdf.output())
+
+# ==========================================
+# 7. 主程序
 # ==========================================
 def main():
     st.sidebar.title("🦅 ALPHA HUNTER")
     
+    # 1. Inputs
     st.sidebar.caption("1. DATA FEED")
     uploaded_file = st.sidebar.file_uploader("Upload Portfolio", type=['xlsx'])
     if uploaded_file: df_raw = load_data(uploaded_file)
@@ -204,17 +282,15 @@ def main():
             {'Ticker': '002459', 'Company': '晶澳科技', 'Gross Margin': 15.5, 'Overseas Ratio': 55.0, 'Inventory Days': 88, 'Debt Ratio': 60.0, 'Cash Flow': 0}
         ])
 
-    st.sidebar.caption("2. MACRO SHOCKS")
+    st.sidebar.caption("2. PARAMETERS")
     params = {
-        'margin_shock': st.sidebar.slider("Margin Squeeze (bps)", 0, 1000, 300),
-        'tariff_shock': st.sidebar.slider("Tariff (%)", 0.0, 1.0, 0.25),
-        'rate_hike_bps': st.sidebar.slider("Rate Hike (bps)", 0, 500, 100),
-        'raw_material_shock': st.sidebar.slider("Input Inflation (%)", 0, 50, 10),
-        'fx_shock': st.sidebar.slider("FX Impact (%)", 0, 20, 5)
+        'margin_shock': st.sidebar.slider("Margin Squeeze", 0, 1000, 300),
+        'tariff_shock': st.sidebar.slider("Tariff", 0.0, 1.0, 0.25),
+        'rate_hike_bps': st.sidebar.slider("Rate Hike", 0, 500, 100),
+        'raw_material_shock': st.sidebar.slider("Inflation", 0, 50, 10),
+        'fx_shock': st.sidebar.slider("FX", 0, 20, 5)
     }
-
-    st.sidebar.caption("3. CALIBRATION")
-    calib_intercept = st.sidebar.slider("Model Calibration (Intercept)", -5.0, 2.0, -1.0, help="Adjust base default probability")
+    calib_intercept = st.sidebar.slider("Calibration (Intercept)", -5.0, 2.0, -1.0)
 
     try:
         res = df_raw.apply(lambda r: CreditEngine.calculate(r, params, calib_intercept), axis=1)
@@ -228,11 +304,9 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.metric("MLOps: PSI Monitor", f"{psi:.3f}", delta="Stable" if psi<0.1 else "Drift", delta_color="inverse")
 
-    # ==========================================
-    # Alpha Hunter 界面
-    # ==========================================
-    st.title("GLOBAL CREDIT LENS | V30.2")
-    st.caption("Mode: Distressed Alpha Hunter | Modules: CDS / RWA / Swan / PSI / IV")
+    # Main UI
+    st.title("GLOBAL CREDIT LENS | V31.0")
+    st.caption("Mode: Distressed Alpha Hunter (Full Integrity)")
 
     c_search, _ = st.columns([1, 2])
     with c_search:
@@ -241,130 +315,84 @@ def main():
     selected_ticker = selected_label.split(" | ")[0]
     row = df_final[df_final['Ticker'] == selected_ticker].iloc[0]
 
-    # --- 1. 交易控制台 ---
+    # --- Trading Desk ---
     st.markdown("### 📡 ALPHA TRADING DESK")
     c1, c2, c3 = st.columns([1, 1, 2])
-    with c1:
-        market_spread = st.number_input("📉 Market CDS Spread (bps)", value=300, step=10)
-    with c2:
-        recovery = st.number_input("♻️ Recovery Rate (%)", value=40, step=5) / 100.0
+    with c1: market_spread = st.number_input("📉 Market CDS (bps)", value=300, step=10)
+    with c2: recovery = st.number_input("♻️ Recovery (%)", value=40, step=5) / 100.0
     
-    trader = TradingEngine(recovery_rate=recovery)
+    trader = TradingEngine(recovery)
     fair_spread, signal, desc, color, diff = trader.generate_signal(row['PD_Prob'], market_spread)
 
     with c3:
         st.markdown(f"""
             <div style="background-color:#111; padding:15px; border: 1px solid {color}; border-left: 10px solid {color};">
-                <h2 style="color:{color}; margin:0; font-family:'Arial Black';">{signal}</h2>
-                <p style="color:#EEE; font-size:16px; margin:5px 0;">{desc}</p>
+                <h2 style="color:{color}; margin:0;">{signal}</h2>
+                <p style="color:#EEE;">{desc}</p>
             </div>
         """, unsafe_allow_html=True)
-
-    # --- 2. 仪表盘 ---
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        fig = go.Figure(go.Indicator(
-            mode = "number+delta",
-            value = fair_spread,
-            delta = {'reference': market_spread, 'position': "top", 'valueformat': ".0f"},
-            title = {'text': f"Arbitrage Spread Gap (bps)", 'font': {'size': 14, 'color': '#888'}},
-            number = {'suffix': " bps", 'font': {'size': 50, 'color': 'white'}},
-            domain = {'row': 0, 'column': 0}
-        ))
-        fig.update_layout(height=200, margin=dict(t=30,b=0), paper_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig, use_container_width=True)
         
+    # --- NLP Radar ---
+    st.markdown("### 📰 NLP SENTIMENT RADAR")
+    nlp = SentimentEngine()
+    news_list, sent_score, sent_label = nlp.analyze_news(row['Ticker'])
+    
+    nc1, nc2 = st.columns([1, 3])
+    with nc1:
+        sent_color = "#28A745" if sent_score > 0 else ("#DC3545" if sent_score < 0 else "#888")
+        st.metric("AI Sentiment Score", sent_score, sent_label)
+    with nc2:
+        for src, title, tag in news_list:
+            t_col = "green" if tag=="Positive" else ("red" if tag=="Negative" else "grey")
+            st.markdown(f"<span style='color:#FFD700'>[{src}]</span> {title} <span style='color:{t_col}'>({tag})</span>", unsafe_allow_html=True)
+
+    # --- Analytics Charts ---
+    st.markdown("---")
+    col1, col2 = st.columns(2)
+    with col1:
+        fig = go.Figure(go.Indicator(mode="number+delta", value=fair_spread, delta={'reference': market_spread}, title={'text': "Arbitrage Gap (bps)"}))
+        fig.update_layout(height=200, paper_bgcolor='rgba(0,0,0,0)', font={'color':'white'})
+        st.plotly_chart(fig, use_container_width=True)
     with col2:
-        fig_score = go.Figure(go.Indicator(
-            mode = "gauge+number", value = row['Score'],
-            title = {'text': f"Credit Score (PD: {row['PD_Prob']:.1%})", 'font': {'size': 14, 'color': '#888'}},
-            gauge = {'axis': {'range': [300, 850]}, 'bar': {'color': color}, 'bgcolor': "#222", 
-                     'steps': [{'range': [300,550], 'color':'#300'}, {'range': [650,850], 'color':'#030'}]}
-        ))
-        fig_score.update_layout(height=200, margin=dict(t=30,b=0), paper_bgcolor='rgba(0,0,0,0)', font={'color':'white'})
+        fig_score = go.Figure(go.Indicator(mode="gauge+number", value=row['Score'], gauge={'axis': {'range': [300, 850]}, 'bar': {'color': color}}))
+        fig_score.update_layout(height=200, paper_bgcolor='rgba(0,0,0,0)', font={'color':'white'})
         st.plotly_chart(fig_score, use_container_width=True)
 
-    # --- 3. 风险分析 (瀑布图修复版) ---
-    st.markdown("---")
-    st.subheader("🛠️ RISK & CAPITAL ANALYTICS")
-    
+    # --- Risk Analytics (Basel & Swan) ---
     basel = BaselEngine()
     _, _, cap_stress = basel.calculate_rwa(10_000_000, row['Rating'])
     swan = BlackSwanEngine.simulate_survival(row, 0.4, 0.25)
     
-    bc1, bc2 = st.columns(2)
-    with bc1:
-        # [修复] 资本瀑布图 (白色字体)
-        fig_cap = go.Figure(go.Waterfall(
-            name = "Capital", orientation = "v",
-            measure = ["relative", "total"],
-            x = ["Base RWA", "Stressed RWA"],
-            textposition = "auto",
-            text = [f"${cap_stress/1000:.0f}k", f"${cap_stress/1000:.0f}k"],
-            textfont = dict(color="white", size=14, family="Arial Black"),
-            y = [0, cap_stress], # 简化展示
-            connector = {"line":{"color":"#666"}},
-            decreasing = {"marker":{"color":"#FF4B4B"}}, totals = {"marker":{"color":"#EEE"}}
-        ))
-        fig_cap.update_layout(title="Basel III Capital Impact", template="plotly_dark", height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_cap, use_container_width=True)
-
-    with bc2:
-        # [修复] 黑天鹅瀑布图 (白色字体)
-        is_alive = swan['Is_Survive']
-        fig_swan = go.Figure(go.Waterfall(
-            name = "Survival", orientation = "v",
-            measure = ["relative", "relative", "total"],
-            x = ["Base Profit", "Shock", "Final"],
-            textposition = "auto",
-            text = [f"{swan['Base_Profit']:.1f}", f"{swan['Impact']:.1f}", f"{swan['Final_Profit']:.1f}"],
-            textfont = dict(color="white", size=14, family="Arial Black"),
-            y = [swan['Base_Profit'], swan['Impact'], swan['Final_Profit']],
-            connector = {"line":{"color":"#666"}},
-            increasing = {"marker":{"color":"#28A745"}}, decreasing = {"marker":{"color":"#FF3333"}}, totals = {"marker":{"color": "#FFF" if is_alive else "#555"}}
-        ))
-        fig_swan.update_layout(title="Black Swan Survival Test", template="plotly_dark", height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_swan, use_container_width=True)
-
-    # --- 4. 量化看板 (包含气泡图修复) ---
-    st.markdown("---")
-    st.subheader("📊 QUANTITATIVE METRICS")
-    
-    # [修复] 找回所有的 Tab
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ Risk Heatmap", "🛁 Bubble Chart", "🎻 Rating Dist", "🔗 Correlations", "🧠 IV Analysis"])
-
+    tab1, tab2, tab3 = st.tabs(["🏛️ Basel Capital", "🏴‍☠️ Black Swan", "🛁 Competition"])
     with tab1:
-        if not df_final.empty:
-            st.plotly_chart(px.treemap(df_final, path=[px.Constant("Market"), 'Rating', 'Search_Label'], values='Score', color='Score', color_continuous_scale='RdYlGn'), use_container_width=True)
-    
+        fig_cap = go.Figure(go.Waterfall(measure=["relative", "total"], x=["Base", "Stressed"], y=[0, cap_stress], text=[f"${cap_stress/1000:.0f}k", f"${cap_stress/1000:.0f}k"], textfont=dict(color="white"), connector={"line":{"color":"#666"}}, decreasing={"marker":{"color":"#FF4B4B"}}, totals={"marker":{"color":"#EEE"}}))
+        fig_cap.update_layout(title="Capital Impact (Restore)", template="plotly_dark", height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_cap, use_container_width=True)
     with tab2:
-        # [修复] 找回气泡图
-        if not df_final.empty:
-            st.plotly_chart(px.scatter(df_final, x="Stressed_GM", y="Score", size="Debt Ratio", color="Rating", hover_name="Company", text="Company", title="Profitability vs Risk Score (Size=Debt)"), use_container_width=True)
-
+        is_alive = swan['Is_Survive']
+        fig_swan = go.Figure(go.Waterfall(measure=["relative", "relative", "total"], x=["Base", "Shock", "Final"], y=[swan['Base_Profit'], swan['Impact'], swan['Final_Profit']], text=[f"{swan['Base_Profit']:.1f}", f"{swan['Impact']:.1f}", f"{swan['Final_Profit']:.1f}"], textfont=dict(color="white"), connector={"line":{"color":"#666"}}, increasing={"marker":{"color":"#28A745"}}, decreasing={"marker":{"color":"#FF4B4B"}}, totals={"marker":{"color": "#FFF" if is_alive else "#555"}}))
+        fig_swan.update_layout(title="Survival Test", template="plotly_dark", height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_swan, use_container_width=True)
     with tab3:
         if not df_final.empty:
-            st.plotly_chart(px.strip(df_final, x="Rating", y="Score", color="Rating"), use_container_width=True)
-    
-    with tab4:
-        if not df_final.empty:
-            st.plotly_chart(px.imshow(df_final[['Score', 'Gross Margin', 'Overseas Ratio', 'Inventory Days', 'Debt Ratio']].corr(), text_auto=True, color_continuous_scale='RdBu_r'), use_container_width=True)
+            st.plotly_chart(px.scatter(df_final, x="Stressed_GM", y="Score", size="Debt Ratio", color="Rating", hover_name="Company", title="Profit vs Risk"), use_container_width=True)
 
-    with tab5:
-        if not df_final.empty:
-            target_col = 'Is_Bad'
-            df_final['Is_Bad'] = df_final['PD_Prob'].apply(lambda x: 1 if x > 0.30 else 0)
-            iv_result = IV_Engine.calculate_iv(df_final, target_col=target_col, feature_cols=['Gross Margin', 'Debt Ratio', 'Overseas Ratio', 'Inventory Days', 'Cash Flow'])
-            st.plotly_chart(px.bar(iv_result, x='IV', y='Feature', orientation='h', color='Feature'), use_container_width=True)
-
-    # --- 5. 底部架构 ---
+    # --- Footer & PDF Download ---
     st.markdown("---")
-    with st.expander("🏗️ System Architecture (V30.2)", expanded=False):
-        st.markdown("""
-        **1. Presentation Layer:** Streamlit, High-Contrast Viz (Fixed).
-        **2. Core Computing Layer:** * **Scoring:** Logit + PDO. * **Trading:** CDS Pricing Engine. * **Survival:** Swan Engine. * **MLOps:** PSI.
-        **3. Data Layer:** Excel Feed.
-        """)
+    
+    # 修复：直接使用 st.download_button，不再嵌套在 if st.button 中
+    pdf_bytes = generate_pdf_report(row, signal, fair_spread, market_spread, diff, cap_stress, swan, sent_score, sent_label, news_list)
+    
+    st.download_button(
+        label="📥 DOWNLOAD INSTITUTIONAL MEMO (PDF)",
+        data=pdf_bytes,
+        file_name=f"Alpha_Memo_{row['Ticker']}.pdf",
+        mime="application/pdf",
+        help="Generate comprehensive PDF report with Risk, Capital, and Trading signals."
+    )
+    
+    with st.expander("🏗️ System Architecture (V31.0)"):
+        st.markdown("**Core:** Logit+PDO / CDS Pricing / Swan Engine / NLP Sentiment / MLOps PSI")
 
 if __name__ == "__main__":
     main()
