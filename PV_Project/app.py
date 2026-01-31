@@ -8,9 +8,9 @@ from fpdf import FPDF
 import io
 
 # ==========================================
-# 0. 系统配置 (V31.3 Critical Hotfix)
+# 0. 系统配置 (V31.4 Stable Fix)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V31.3", layout="wide", page_icon="🦅")
+st.set_page_config(page_title="Global Credit Lens V31.4", layout="wide", page_icon="🦅")
 
 st.markdown("""
     <style>
@@ -229,7 +229,7 @@ def generate_pdf_report(row, signal, fair_spread, market_spread, diff, cap_stres
     pdf.set_font("Arial", "B", 16)
     pdf.cell(0, 10, f"INSTITUTIONAL MEMO: {row['Ticker']}", 0, 1)
     pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | System: Global Credit Lens V31.3", 0, 1)
+    pdf.cell(0, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | System: Global Credit Lens V31.4", 0, 1)
     pdf.line(10, 25, 200, 25)
     pdf.ln(5)
     
@@ -253,6 +253,10 @@ def generate_pdf_report(row, signal, fair_spread, market_spread, diff, cap_stres
     pdf.cell(0, 10, "3. SENTIMENT RADAR", 0, 1)
     pdf.set_font("Arial", "", 10)
     pdf.cell(0, 8, f"Sentiment Score: {sent_score} ({sent_label})", 0, 1)
+    pdf.cell(0, 8, "Latest Headlines:", 0, 1)
+    pdf.set_font("Arial", "I", 8)
+    for src, title, tag in news_list:
+        pdf.cell(0, 6, f"  - [{src}] {title} ({tag})", 0, 1)
     pdf.ln(5)
     
     pdf.set_font("Arial", "B", 12)
@@ -302,8 +306,8 @@ def main():
     st.sidebar.metric("MLOps: PSI Monitor", f"{psi:.3f}", delta="Stable" if psi<0.1 else "Drift", delta_color="inverse")
 
     # Main UI
-    st.title("GLOBAL CREDIT LENS | V31.3")
-    st.caption("Mode: Distressed Alpha Hunter (Critical Hotfix Edition)")
+    st.title("GLOBAL CREDIT LENS | V31.4")
+    st.caption("Mode: Distressed Alpha Hunter (Stable Hotfix Edition)")
 
     c_search, _ = st.columns([1, 2])
     with c_search:
@@ -329,14 +333,13 @@ def main():
             </div>
         """, unsafe_allow_html=True)
         
-    # --- Analytics Charts (修复1: 暴力放大图表; 修复2: 评级文字回归) ---
+    # --- Analytics Charts ---
     st.markdown("---")
     st.subheader("🔍 CREDIT & ARBITRAGE PROFILE")
     
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        # 交易机会仪表盘 (放大)
         fig = go.Figure(go.Indicator(
             mode = "number+delta",
             value = fair_spread,
@@ -344,21 +347,19 @@ def main():
             title = {'text': "Arbitrage Gap (bps)", 'font': {'size': 20, 'color': '#888'}},
             number = {'suffix': " bps", 'font': {'size': 60, 'color': 'white'}},
         ))
-        fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color':'white'}) # 放大到 350
+        fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color':'white'})
         st.plotly_chart(fig, use_container_width=True)
         
     with col2:
-        # 信用分仪表盘 (放大) + 评级大字展示
         fig_score = go.Figure(go.Indicator(
             mode = "gauge+number", value = row['Score'],
             title = {'text': f"Credit Score (PD: {row['PD_Prob']:.1%})", 'font': {'size': 20, 'color': '#888'}},
             gauge = {'axis': {'range': [300, 850]}, 'bar': {'color': color}, 'bgcolor': "#222", 
                      'steps': [{'range': [300,550], 'color':'#300'}, {'range': [650,850], 'color':'#030'}]}
         ))
-        fig_score.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color':'white'}) # 放大到 350
+        fig_score.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color':'white'})
         st.plotly_chart(fig_score, use_container_width=True)
         
-        # [修复] 评级大字回归
         st.markdown(f"""
             <div style="text-align:center; margin-top:-20px;">
                 <h2 style="color:{color}; font-size: 32px; border: 1px solid #444; display:inline-block; padding: 5px 20px; border-radius:10px;">
@@ -367,17 +368,16 @@ def main():
             </div>
         """, unsafe_allow_html=True)
 
-    # --- Risk Analytics (Basel & Swan) (修复: 放大 + 文字清晰) ---
+    # --- Risk Analytics ---
     basel = BaselEngine()
     _, _, cap_stress = basel.calculate_rwa(10_000_000, row['Rating'])
     swan = BlackSwanEngine.simulate_survival(row, 0.4, 0.25)
     
     st.markdown("---")
-    st.subheader("🛠️ STRESS TEST IMPACT (WATERFALLS)")
+    st.subheader("🛠️ STRESS TEST IMPACT")
     
     bc1, bc2 = st.columns(2)
     with bc1:
-        # 资本瀑布 (三步走 + 放大)
         fig_cap = go.Figure(go.Waterfall(
             measure=["relative", "relative", "total"], 
             x=["Base RWA", "Stress Impact", "Final RWA"], 
@@ -386,11 +386,10 @@ def main():
             textfont=dict(color="white", size=16, family="Arial Black"), 
             connector={"line":{"color":"#666"}}, decreasing={"marker":{"color":"#FF4B4B"}}, totals={"marker":{"color":"#EEE"}}
         ))
-        fig_cap.update_layout(title="Basel III Capital Impact", template="plotly_dark", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)') # 放大到 400
+        fig_cap.update_layout(title="Basel III Capital Impact", template="plotly_dark", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_cap, use_container_width=True)
         
     with bc2:
-        # 生存瀑布 (三步走 + 放大)
         is_alive = swan['Is_Survive']
         fig_swan = go.Figure(go.Waterfall(
             measure=["relative", "relative", "total"], 
@@ -400,14 +399,18 @@ def main():
             textfont=dict(color="white", size=16, family="Arial Black"), 
             connector={"line":{"color":"#666"}}, increasing={"marker":{"color":"#28A745"}}, decreasing={"marker":{"color":"#FF4B4B"}}, totals={"marker":{"color": "#FFF" if is_alive else "#555"}}
         ))
-        fig_swan.update_layout(title="Black Swan Survival Test", template="plotly_dark", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)') # 放大到 400
+        fig_swan.update_layout(title="Black Swan Survival Test", template="plotly_dark", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_swan, use_container_width=True)
 
-    # --- 4. Quant Dashboard (修复3: 热力图与全模块回归) ---
+    # --- [关键修复]：在 Main 里面重新声明 NLP 变量 ---
+    # 这部分代码之前漏了，导致 PDF 生成时报错
+    nlp = SentimentEngine()
+    news_list, sent_score, sent_label = nlp.analyze_news(row['Ticker'])
+
+    # --- 4. Quant Dashboard ---
     st.markdown("---")
-    st.subheader("📊 QUANTITATIVE DASHBOARD (FULL MODULES)")
+    st.subheader("📊 QUANTITATIVE DASHBOARD")
     
-    # [修复] 找回所有的 Tab，包括热力图和气泡图
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ Risk Heatmap", "🛁 Bubble Chart", "🎻 Rating Dist", "🔗 Correlations", "🧠 IV Analysis"])
 
     with tab1:
