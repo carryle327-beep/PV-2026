@@ -10,7 +10,7 @@ import io
 # ==========================================
 # 0. 系统配置 (V31.4 Stable Fix)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V31.4", layout="wide", page_icon="🦅")
+st.set_page_config(page_title="Global Credit Lens: Distressed Asset Arbitrage & Risk System", layout="wide", page_icon="🦅")
 
 st.markdown("""
     <style>
@@ -452,3 +452,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
