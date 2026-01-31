@@ -35,7 +35,7 @@ st.markdown("""
 # 1. 鉴权 & 数据加载
 # ==========================================
 def check_password():
-    CORRECT_PASSWORD = "HR2026"
+    CORRECT_PASSWORD = "2026"
     if "password_correct" not in st.session_state:
         st.text_input("🔒 TERMINAL ACCESS KEY", type="password", key="password", on_change=lambda: st.session_state.update({"password_correct": st.session_state["password"] == CORRECT_PASSWORD}))
         return False
@@ -452,4 +452,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
