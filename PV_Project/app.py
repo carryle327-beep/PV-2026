@@ -8,19 +8,26 @@ from fpdf import FPDF
 import io
 
 # ==========================================
-# 0. 系统配置 (V31.2 Stable Fix Edition)
+# 0. 系统配置 (V31.3 Critical Hotfix)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V31.2", layout="wide", page_icon="🦅")
+st.set_page_config(page_title="Global Credit Lens V31.3", layout="wide", page_icon="🦅")
 
 st.markdown("""
     <style>
     .stApp { background-color: #000000 !important; color: #E0E0E0; font-family: 'Consolas', 'Roboto Mono', monospace; }
     [data-testid="stSidebar"] { background-color: #111 !important; border-right: 1px solid #333; }
     h1, h2, h3 { color: #FFFFFF !important; font-weight: 600 !important; }
-    .stMetric { background-color: #0F0F0F; border: 1px solid #333; padding: 10px; border-radius: 0px; border-left: 3px solid #FFD700; }
-    .stButton>button { background-color: #222; color: #FFD700; border: 1px solid #FFD700; border-radius: 0px; font-weight: bold; width: 100%; }
+    /* 指标卡片优化 */
+    .stMetric { background-color: #111; border: 1px solid #444; padding: 15px; border-left: 5px solid #FFD700; }
+    .stMetric label { color: #888 !important; font-size: 1.2rem !important; }
+    .stMetric div[data-testid="stMetricValue"] { color: #FFF !important; font-size: 2rem !important; font-weight: bold; }
+    /* 按钮 */
+    .stButton>button { background-color: #222; color: #FFD700; border: 1px solid #FFD700; border-radius: 4px; font-weight: bold; width: 100%; height: 50px; font-size: 16px; }
     .stButton>button:hover { background-color: #FFD700; color: #000; }
-    .streamlit-expanderHeader { background-color: #222 !important; color: #FFF !important; }
+    /* Tab 样式 */
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    .stTabs [data-baseweb="tab"] { background-color: #222; border-radius: 4px 4px 0 0; color: #AAA; }
+    .stTabs [aria-selected="true"] { background-color: #0056D2 !important; color: white !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -83,12 +90,12 @@ class CreditEngine:
         pd_val = CreditEngine.sigmoid(logit_z)
         score = CreditEngine.scale_score(pd_val, base_score=600, base_odds=20, pdo=40)
         
-        if score >= 750: rating = "AA"
-        elif score >= 700: rating = "A"
-        elif score >= 650: rating = "BBB"
-        elif score >= 580: rating = "BB"
-        elif score >= 500: rating = "B"
-        else: rating = "CCC"
+        if score >= 750: rating = "AA (High Grade)"
+        elif score >= 700: rating = "A (Upper Medium)"
+        elif score >= 650: rating = "BBB (Medium)"
+        elif score >= 580: rating = "BB (Speculative)"
+        elif score >= 500: rating = "B (Highly Speculative)"
+        else: rating = "CCC (Substantial Risk)"
         
         return pd.Series({'Stressed_GM': final_gm, 'PD_Prob': pd_val, 'Score': score, 'Rating': rating})
 
@@ -123,13 +130,11 @@ class TradingEngine:
         return fair_spread, signal, desc, color, diff
 
 # ==========================================
-# 4. NLP 舆情引擎 (English Mock Data)
+# 4. NLP 舆情引擎 (English Mock)
 # ==========================================
 class SentimentEngine:
     @staticmethod
     def analyze_news(ticker):
-        # [关键修复] 使用英文 Mock 数据，防止 PDF 生成崩溃
-        # 如果这里使用 AkShare 抓取中文，PDF 生成会报错，除非安装中文字体
         news_db = {
             '300750': [("Reuters", "CATL confirms new plant deal with Ford in US", "Positive"), ("Bloomberg", "Lithium prices drop 20%, boosting margins", "Positive")],
             '601012': [("WSJ", "LONGi solar panels detained by US Customs", "Negative"), ("Analyst", "Global oversupply warning issued", "Negative")],
@@ -162,7 +167,7 @@ class BaselEngine:
     def calculate_rwa(self, exposure, rating):
         rw = 1.5
         for key in self.rw_map:
-            if rating.startswith(key):
+            if rating.startswith(key.split(' ')[0]):
                 rw = self.rw_map[key]
                 break
         return rw, exposure*rw, exposure*rw*self.capital_ratio
@@ -213,43 +218,29 @@ class IV_Engine:
         return pd.DataFrame(iv_list).sort_values(by='IV', ascending=False)
 
 # ==========================================
-# 6. PDF 生成器 (Fix: Chinese Mapping & UTF8)
+# 6. PDF 生成器 (English Only)
 # ==========================================
 def generate_pdf_report(row, signal, fair_spread, market_spread, diff, cap_stress, swan, sent_score, sent_label, news_list):
-    # [关键修复] 中文映射表：解决 FPDF 无法显示中文的问题
-    # 强制将中文公司名转换为英文，确保 PDF 生成成功
-    company_map = {
-        '通威股份': 'Tongwei Co.',
-        '宁德时代': 'CATL',
-        '隆基绿能': 'LONGi Green Energy',
-        '天合光能': 'Trina Solar',
-        '晶澳科技': 'JA Solar Technology'
-    }
-    # 如果找不到映射，就用 Ticker 代替，绝不让它报错
+    company_map = {'通威股份': 'Tongwei Co.', '宁德时代': 'CATL', '隆基绿能': 'LONGi Green Energy', '天合光能': 'Trina Solar', '晶澳科技': 'JA Solar Technology'}
     company_name_en = company_map.get(row['Company'], f"Ticker {row['Ticker']}")
 
     pdf = FPDF()
     pdf.add_page()
-    
-    # Header
     pdf.set_font("Arial", "B", 16)
     pdf.cell(0, 10, f"INSTITUTIONAL MEMO: {row['Ticker']}", 0, 1)
     pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | System: Global Credit Lens V31.2", 0, 1)
+    pdf.cell(0, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | System: Global Credit Lens V31.3", 0, 1)
     pdf.line(10, 25, 200, 25)
     pdf.ln(5)
     
-    # 1. Executive Summary
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, "1. EXECUTIVE SUMMARY", 0, 1)
     pdf.set_font("Arial", "", 10)
-    # [关键] 使用映射后的英文名
     pdf.cell(0, 8, f"Target: {company_name_en}", 0, 1) 
     pdf.cell(0, 8, f"Rating: {row['Rating']} (Score: {row['Score']})", 0, 1)
     pdf.cell(0, 8, f"Alpha Signal: {signal}", 0, 1)
     pdf.ln(5)
 
-    # 2. Trading Analytics
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, "2. ALPHA TRADING DESK", 0, 1)
     pdf.set_font("Arial", "", 10)
@@ -258,25 +249,17 @@ def generate_pdf_report(row, signal, fair_spread, market_spread, diff, cap_stres
     pdf.cell(0, 8, f"Arbitrage Gap: {diff:.0f} bps", 0, 1)
     pdf.ln(5)
 
-    # 3. Sentiment Radar
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 10, "3. SENTIMENT RADAR (NLP)", 0, 1)
+    pdf.cell(0, 10, "3. SENTIMENT RADAR", 0, 1)
     pdf.set_font("Arial", "", 10)
     pdf.cell(0, 8, f"Sentiment Score: {sent_score} ({sent_label})", 0, 1)
-    pdf.cell(0, 8, "Latest Headlines:", 0, 1)
-    pdf.set_font("Arial", "I", 8)
-    for src, title, tag in news_list:
-        # News titles are English (from mock data)
-        pdf.cell(0, 6, f"  - [{src}] {title} ({tag})", 0, 1)
     pdf.ln(5)
     
-    # 4. Risk & Capital
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, "4. RISK & CAPITAL", 0, 1)
     pdf.set_font("Arial", "", 10)
     pdf.cell(0, 8, f"Basel III Capital Charge: ${cap_stress:,.0f}", 0, 1)
     pdf.cell(0, 8, f"Black Swan Survival: {'YES' if swan['Is_Survive'] else 'NO'}", 0, 1)
-
     return bytes(pdf.output())
 
 # ==========================================
@@ -284,8 +267,6 @@ def generate_pdf_report(row, signal, fair_spread, market_spread, diff, cap_stres
 # ==========================================
 def main():
     st.sidebar.title("🦅 ALPHA HUNTER")
-    
-    # 1. Inputs
     st.sidebar.caption("1. DATA FEED")
     uploaded_file = st.sidebar.file_uploader("Upload Portfolio", type=['xlsx'])
     if uploaded_file: df_raw = load_data(uploaded_file)
@@ -321,8 +302,8 @@ def main():
     st.sidebar.metric("MLOps: PSI Monitor", f"{psi:.3f}", delta="Stable" if psi<0.1 else "Drift", delta_color="inverse")
 
     # Main UI
-    st.title("GLOBAL CREDIT LENS | V31.2")
-    st.caption("Mode: Distressed Alpha Hunter (Stable Edition)")
+    st.title("GLOBAL CREDIT LENS | V31.3")
+    st.caption("Mode: Distressed Alpha Hunter (Critical Hotfix Edition)")
 
     c_search, _ = st.columns([1, 2])
     with c_search:
@@ -348,68 +329,123 @@ def main():
             </div>
         """, unsafe_allow_html=True)
         
-    # --- NLP Radar ---
-    st.markdown("### 📰 NLP SENTIMENT RADAR")
-    nlp = SentimentEngine()
-    news_list, sent_score, sent_label = nlp.analyze_news(row['Ticker'])
-    
-    nc1, nc2 = st.columns([1, 3])
-    with nc1:
-        sent_color = "#28A745" if sent_score > 0 else ("#DC3545" if sent_score < 0 else "#888")
-        st.metric("AI Sentiment Score", sent_score, sent_label)
-    with nc2:
-        for src, title, tag in news_list:
-            t_col = "green" if tag=="Positive" else ("red" if tag=="Negative" else "grey")
-            st.markdown(f"<span style='color:#FFD700'>[{src}]</span> {title} <span style='color:{t_col}'>({tag})</span>", unsafe_allow_html=True)
-
-    # --- Analytics Charts ---
+    # --- Analytics Charts (修复1: 暴力放大图表; 修复2: 评级文字回归) ---
     st.markdown("---")
-    col1, col2 = st.columns(2)
+    st.subheader("🔍 CREDIT & ARBITRAGE PROFILE")
+    
+    col1, col2 = st.columns([1, 1])
+    
     with col1:
-        fig = go.Figure(go.Indicator(mode="number+delta", value=fair_spread, delta={'reference': market_spread}, title={'text': "Arbitrage Gap (bps)"}))
-        fig.update_layout(height=200, paper_bgcolor='rgba(0,0,0,0)', font={'color':'white'})
+        # 交易机会仪表盘 (放大)
+        fig = go.Figure(go.Indicator(
+            mode = "number+delta",
+            value = fair_spread,
+            delta = {'reference': market_spread, 'position': "top", 'valueformat': ".0f"},
+            title = {'text': "Arbitrage Gap (bps)", 'font': {'size': 20, 'color': '#888'}},
+            number = {'suffix': " bps", 'font': {'size': 60, 'color': 'white'}},
+        ))
+        fig.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color':'white'}) # 放大到 350
         st.plotly_chart(fig, use_container_width=True)
+        
     with col2:
-        fig_score = go.Figure(go.Indicator(mode="gauge+number", value=row['Score'], gauge={'axis': {'range': [300, 850]}, 'bar': {'color': color}}))
-        fig_score.update_layout(height=200, paper_bgcolor='rgba(0,0,0,0)', font={'color':'white'})
+        # 信用分仪表盘 (放大) + 评级大字展示
+        fig_score = go.Figure(go.Indicator(
+            mode = "gauge+number", value = row['Score'],
+            title = {'text': f"Credit Score (PD: {row['PD_Prob']:.1%})", 'font': {'size': 20, 'color': '#888'}},
+            gauge = {'axis': {'range': [300, 850]}, 'bar': {'color': color}, 'bgcolor': "#222", 
+                     'steps': [{'range': [300,550], 'color':'#300'}, {'range': [650,850], 'color':'#030'}]}
+        ))
+        fig_score.update_layout(height=350, paper_bgcolor='rgba(0,0,0,0)', font={'color':'white'}) # 放大到 350
         st.plotly_chart(fig_score, use_container_width=True)
+        
+        # [修复] 评级大字回归
+        st.markdown(f"""
+            <div style="text-align:center; margin-top:-20px;">
+                <h2 style="color:{color}; font-size: 32px; border: 1px solid #444; display:inline-block; padding: 5px 20px; border-radius:10px;">
+                    {row['Rating']}
+                </h2>
+            </div>
+        """, unsafe_allow_html=True)
 
-    # --- Risk Analytics (Basel & Swan) ---
+    # --- Risk Analytics (Basel & Swan) (修复: 放大 + 文字清晰) ---
     basel = BaselEngine()
     _, _, cap_stress = basel.calculate_rwa(10_000_000, row['Rating'])
     swan = BlackSwanEngine.simulate_survival(row, 0.4, 0.25)
     
-    tab1, tab2, tab3 = st.tabs(["🏛️ Basel Capital", "🏴‍☠️ Black Swan", "🛁 Competition"])
-    with tab1:
-        # [修复] 找回三步瀑布图
-        fig_cap = go.Figure(go.Waterfall(measure=["relative", "relative", "total"], x=["Base", "Impact", "Final"], y=[0, cap_stress, cap_stress], text=[f"${cap_stress/1000:.0f}k", f"+${0:.0f}k", f"${cap_stress/1000:.0f}k"], textfont=dict(color="white"), connector={"line":{"color":"#666"}}, decreasing={"marker":{"color":"#FF4B4B"}}, totals={"marker":{"color":"#EEE"}}))
-        fig_cap.update_layout(title="Capital Impact", template="plotly_dark", height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+    st.markdown("---")
+    st.subheader("🛠️ STRESS TEST IMPACT (WATERFALLS)")
+    
+    bc1, bc2 = st.columns(2)
+    with bc1:
+        # 资本瀑布 (三步走 + 放大)
+        fig_cap = go.Figure(go.Waterfall(
+            measure=["relative", "relative", "total"], 
+            x=["Base RWA", "Stress Impact", "Final RWA"], 
+            y=[0, cap_stress, cap_stress], 
+            text=[f"$0", f"+${cap_stress/1000:.0f}k", f"${cap_stress/1000:.0f}k"], 
+            textfont=dict(color="white", size=16, family="Arial Black"), 
+            connector={"line":{"color":"#666"}}, decreasing={"marker":{"color":"#FF4B4B"}}, totals={"marker":{"color":"#EEE"}}
+        ))
+        fig_cap.update_layout(title="Basel III Capital Impact", template="plotly_dark", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)') # 放大到 400
         st.plotly_chart(fig_cap, use_container_width=True)
-    with tab2:
+        
+    with bc2:
+        # 生存瀑布 (三步走 + 放大)
         is_alive = swan['Is_Survive']
-        fig_swan = go.Figure(go.Waterfall(measure=["relative", "relative", "total"], x=["Base", "Shock", "Final"], y=[swan['Base_Profit'], swan['Impact'], swan['Final_Profit']], text=[f"{swan['Base_Profit']:.1f}", f"{swan['Impact']:.1f}", f"{swan['Final_Profit']:.1f}"], textfont=dict(color="white"), connector={"line":{"color":"#666"}}, increasing={"marker":{"color":"#28A745"}}, decreasing={"marker":{"color":"#FF4B4B"}}, totals={"marker":{"color": "#FFF" if is_alive else "#555"}}))
-        fig_swan.update_layout(title="Survival Test", template="plotly_dark", height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        fig_swan = go.Figure(go.Waterfall(
+            measure=["relative", "relative", "total"], 
+            x=["Base Profit", "Shock", "Final"], 
+            y=[swan['Base_Profit'], swan['Impact'], swan['Final_Profit']], 
+            text=[f"{swan['Base_Profit']:.1f}", f"{swan['Impact']:.1f}", f"{swan['Final_Profit']:.1f}"], 
+            textfont=dict(color="white", size=16, family="Arial Black"), 
+            connector={"line":{"color":"#666"}}, increasing={"marker":{"color":"#28A745"}}, decreasing={"marker":{"color":"#FF4B4B"}}, totals={"marker":{"color": "#FFF" if is_alive else "#555"}}
+        ))
+        fig_swan.update_layout(title="Black Swan Survival Test", template="plotly_dark", height=400, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)') # 放大到 400
         st.plotly_chart(fig_swan, use_container_width=True)
+
+    # --- 4. Quant Dashboard (修复3: 热力图与全模块回归) ---
+    st.markdown("---")
+    st.subheader("📊 QUANTITATIVE DASHBOARD (FULL MODULES)")
+    
+    # [修复] 找回所有的 Tab，包括热力图和气泡图
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ Risk Heatmap", "🛁 Bubble Chart", "🎻 Rating Dist", "🔗 Correlations", "🧠 IV Analysis"])
+
+    with tab1:
+        if not df_final.empty:
+            fig_map = px.treemap(df_final, path=[px.Constant("Market"), 'Rating', 'Search_Label'], values='Score', color='Score', color_continuous_scale='RdYlGn', title="Portfolio Risk Heatmap")
+            fig_map.update_layout(height=500, template="plotly_dark")
+            st.plotly_chart(fig_map, use_container_width=True)
+    
+    with tab2:
+        if not df_final.empty:
+            fig_bub = px.scatter(df_final, x="Stressed_GM", y="Score", size="Debt Ratio", color="Rating", hover_name="Company", text="Ticker", title="Profitability vs Risk (Bubble Size = Debt)", size_max=60)
+            fig_bub.update_layout(height=500, template="plotly_dark")
+            st.plotly_chart(fig_bub, use_container_width=True)
+
     with tab3:
         if not df_final.empty:
-            st.plotly_chart(px.scatter(df_final, x="Stressed_GM", y="Score", size="Debt Ratio", color="Rating", hover_name="Company", title="Profit vs Risk"), use_container_width=True)
+            st.plotly_chart(px.strip(df_final, x="Rating", y="Score", color="Rating", template="plotly_dark"), use_container_width=True)
+    
+    with tab4:
+        if not df_final.empty:
+            st.plotly_chart(px.imshow(df_final[['Score', 'Gross Margin', 'Overseas Ratio', 'Inventory Days', 'Debt Ratio']].corr(), text_auto=True, color_continuous_scale='RdBu_r', template="plotly_dark"), use_container_width=True)
 
-    # --- Footer & PDF Download ---
+    with tab5:
+        if not df_final.empty:
+            target_col = 'Is_Bad'
+            df_final['Is_Bad'] = df_final['PD_Prob'].apply(lambda x: 1 if x > 0.30 else 0)
+            iv_result = IV_Engine.calculate_iv(df_final, target_col=target_col, feature_cols=['Gross Margin', 'Debt Ratio', 'Overseas Ratio', 'Inventory Days', 'Cash Flow'])
+            st.plotly_chart(px.bar(iv_result, x='IV', y='Feature', orientation='h', color='Feature', template="plotly_dark"), use_container_width=True)
+
+    # --- Footer ---
     st.markdown("---")
-    
-    # PDF 生成与下载
     pdf_bytes = generate_pdf_report(row, signal, fair_spread, market_spread, diff, cap_stress, swan, sent_score, sent_label, news_list)
-    
     st.download_button(
         label="📥 DOWNLOAD INSTITUTIONAL MEMO (PDF)",
         data=pdf_bytes,
         file_name=f"Alpha_Memo_{row['Ticker']}.pdf",
-        mime="application/pdf",
-        help="Generate comprehensive PDF report with Risk, Capital, and Trading signals."
+        mime="application/pdf"
     )
-    
-    with st.expander("🏗️ System Architecture (V31.2)"):
-        st.markdown("**Core:** Logit+PDO / CDS Pricing / Swan Engine / NLP Sentiment / MLOps PSI")
 
 if __name__ == "__main__":
     main()
