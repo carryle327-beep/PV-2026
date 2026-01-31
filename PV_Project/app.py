@@ -8,31 +8,19 @@ from fpdf import FPDF
 import io
 
 # ==========================================
-# 0. 系统配置 (V30.0 Alpha Hunter)
+# 0. 系统配置 (V30.2 完整回归版)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V30.0", layout="wide", page_icon="🦅")
+st.set_page_config(page_title="Global Credit Lens V30.2", layout="wide", page_icon="🦅")
 
-# CSS 样式: 极客黑金 / Bloomberg 终端风格
 st.markdown("""
     <style>
-    /* 全局背景设为深黑 */
     .stApp { background-color: #000000 !important; color: #E0E0E0; font-family: 'Consolas', 'Roboto Mono', monospace; }
-    
-    /* 侧边栏 */
     [data-testid="stSidebar"] { background-color: #111 !important; border-right: 1px solid #333; }
-    
-    /* 字体与标题 */
-    h1, h2, h3 { color: #FFFFFF !important; font-weight: 600 !important; letter-spacing: 1px; }
-    
-    /* 核心指标卡片样式 */
+    h1, h2, h3 { color: #FFFFFF !important; font-weight: 600 !important; }
     .stMetric { background-color: #0F0F0F; border: 1px solid #333; padding: 10px; border-radius: 0px; border-left: 3px solid #FFD700; }
-    
-    /* 按钮样式 (金色高亮) */
-    .stButton>button { background-color: #222; color: #FFD700; border: 1px solid #FFD700; border-radius: 0px; font-weight: bold; transition: all 0.3s; }
+    .stButton>button { background-color: #222; color: #FFD700; border: 1px solid #FFD700; border-radius: 0px; font-weight: bold; }
     .stButton>button:hover { background-color: #FFD700; color: #000; }
-    
-    /* 输入框样式 */
-    .stNumberInput input { color: #FFD700 !important; }
+    .streamlit-expanderHeader { background-color: #222 !important; color: #FFF !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -56,7 +44,7 @@ def load_data(file):
     return df
 
 # ==========================================
-# 2. 核心计算引擎 (Logit + PDO Scaling)
+# 2. 核心计算引擎 (带校准参数)
 # ==========================================
 class CreditEngine:
     @staticmethod
@@ -73,7 +61,7 @@ class CreditEngine:
         return int(max(300, min(850, score)))
 
     @staticmethod
-    def calculate(row, params):
+    def calculate(row, params, calibration_intercept):
         try:
             base_gm = float(row.get('Gross Margin', 0))       
             debt_ratio = float(row.get('Debt Ratio', 50))     
@@ -83,7 +71,6 @@ class CreditEngine:
             cf_flag = 1 if cf > 0 else 0
         except: return pd.Series({'Score': 0, 'Rating': 'Error', 'PD_Prob': 1.0, 'Stressed_GM': 0})
 
-        # 压力传导
         market_hit = params.get('margin_shock', 0) / 100.0
         tariff_hit = (overseas / 100.0) * params.get('tariff_shock', 0) * 100
         input_cost_hit = params.get('raw_material_shock', 0) * 0.2
@@ -92,14 +79,11 @@ class CreditEngine:
         final_gm = max(base_gm - market_hit - tariff_hit - input_cost_hit - fx_hit, -10.0)
         rate_hit = (debt_ratio / 100.0) * (params.get('rate_hike_bps', 0) / 100.0) * 5.0
 
-        # Logit 回归 (Intercept = -2.0)
-        logit_z = -2.0 + (-0.12 * final_gm) + (0.015 * inv) + (0.04 * debt_ratio) + (-1.5 * cf_flag) + rate_hit
+        logit_z = calibration_intercept + (-0.12 * final_gm) + (0.015 * inv) + (0.04 * debt_ratio) + (-1.5 * cf_flag) + rate_hit
         pd_val = CreditEngine.sigmoid(logit_z)
         
-        # PDO 校准
         score = CreditEngine.scale_score(pd_val, base_score=600, base_odds=20, pdo=40)
         
-        # 评级
         if score >= 750: rating = "AA"
         elif score >= 700: rating = "A"
         elif score >= 650: rating = "BBB"
@@ -110,49 +94,37 @@ class CreditEngine:
         return pd.Series({'Stressed_GM': final_gm, 'PD_Prob': pd_val, 'Score': score, 'Rating': rating})
 
 # ==========================================
-# 3. [新增] 交易阿尔法引擎 (CDS Pricing)
+# 3. 交易引擎
 # ==========================================
 class TradingEngine:
-    """
-    V30.0 核心: 将风控结果转化为交易信号
-    """
     def __init__(self, recovery_rate=0.40):
-        self.R = recovery_rate # 回收率 40%
+        self.R = recovery_rate
 
     def calculate_fair_spread(self, pd_annual):
-        # 简化强度模型: Spread = PD * LGD * 10000
-        # LGD (违约损失率) = 1 - Recovery Rate
-        spread_bps = pd_annual * (1 - self.R) * 10000
-        return spread_bps
+        return pd_annual * (1 - self.R) * 10000
 
     def generate_signal(self, model_pd, market_spread_bps):
-        # 1. 计算模型公允利差 (我们认为它值多少钱)
         fair_spread = self.calculate_fair_spread(model_pd)
-        
-        # 2. 计算 Alpha (定价偏差)
         diff = fair_spread - market_spread_bps
-        threshold = 50 # 50bps 偏差才开仓
+        threshold = 50 
         
-        # 3. 生成信号
         if diff > threshold:
-            # 模型利差 > 市场利差 = 市场低估风险 = 价格太贵
             signal = "SHORT CREDIT (BUY CDS)"
-            desc = f"⚠️ Risk Underpriced by {diff:.0f}bps. Arbitrage Opportunity."
-            color = "#DC3545" # Red (做空/风险)
+            desc = f"⚠️ Risk Underpriced by {diff:.0f}bps"
+            color = "#DC3545" 
         elif diff < -threshold:
-            # 模型利差 < 市场利差 = 市场过度恐慌 = 价格便宜
             signal = "LONG CREDIT (SELL CDS)"
-            desc = f"💎 Value Opportunity! Mispriced by {abs(diff):.0f}bps."
-            color = "#28A745" # Green (做多/机会)
+            desc = f"💎 Value Opportunity! Mispriced by {abs(diff):.0f}bps"
+            color = "#28A745" 
         else:
-            signal = "NO TRADE (HOLD)"
-            desc = "Market is Efficient. No Arbitrage Gap."
+            signal = "HOLD"
+            desc = "Market is Efficient"
             color = "#555"
             
         return fair_spread, signal, desc, color, diff
 
 # ==========================================
-# 4. 辅助引擎 (Basel, Swan, MLOps)
+# 4. 辅助引擎
 # ==========================================
 class BaselEngine:
     def __init__(self):
@@ -189,12 +161,37 @@ class ModelMonitor:
         except: return 0.0
 
 # ==========================================
-# 5. 主程序
+# 5. IV 计算引擎 (Validation)
+# ==========================================
+class IV_Engine:
+    @staticmethod
+    def calculate_iv(df, target_col='Is_Bad', feature_cols=[]):
+        iv_list = []
+        for col in feature_cols:
+            try:
+                temp_df = df[[col, target_col]].copy()
+                temp_df[col] = pd.to_numeric(temp_df[col], errors='coerce').fillna(0)
+                try: temp_df['bucket'] = pd.qcut(temp_df[col], q=4, duplicates='drop')
+                except: temp_df['bucket'] = pd.cut(temp_df[col], bins=4)
+                grouped = temp_df.groupby('bucket', observed=False)[target_col].agg(['count', 'sum'])
+                grouped['bad'] = grouped['sum']
+                grouped['good'] = grouped['count'] - grouped['sum']
+                total_bad = grouped['bad'].sum() + 1e-5
+                total_good = grouped['good'].sum() + 1e-5
+                grouped['dist_bad'] = (grouped['bad'] + 1e-5) / total_bad
+                grouped['dist_good'] = (grouped['good'] + 1e-5) / total_good
+                grouped['woe'] = np.log(grouped['dist_good'] / grouped['dist_bad'])
+                grouped['iv'] = (grouped['dist_good'] - grouped['dist_bad']) * grouped['woe']
+                iv_list.append({'Feature': col, 'IV': grouped['iv'].sum()})
+            except: continue
+        return pd.DataFrame(iv_list).sort_values(by='IV', ascending=False)
+
+# ==========================================
+# 6. 主程序
 # ==========================================
 def main():
-    st.sidebar.title("🦅 ALPHA HUNTER TERMINAL")
+    st.sidebar.title("🦅 ALPHA HUNTER")
     
-    # 1. 数据源
     st.sidebar.caption("1. DATA FEED")
     uploaded_file = st.sidebar.file_uploader("Upload Portfolio", type=['xlsx'])
     if uploaded_file: df_raw = load_data(uploaded_file)
@@ -207,7 +204,6 @@ def main():
             {'Ticker': '002459', 'Company': '晶澳科技', 'Gross Margin': 15.5, 'Overseas Ratio': 55.0, 'Inventory Days': 88, 'Debt Ratio': 60.0, 'Cash Flow': 0}
         ])
 
-    # 2. 宏观参数
     st.sidebar.caption("2. MACRO SHOCKS")
     params = {
         'margin_shock': st.sidebar.slider("Margin Squeeze (bps)", 0, 1000, 300),
@@ -216,33 +212,28 @@ def main():
         'raw_material_shock': st.sidebar.slider("Input Inflation (%)", 0, 50, 10),
         'fx_shock': st.sidebar.slider("FX Impact (%)", 0, 20, 5)
     }
-    
-    # 模拟计算
+
+    st.sidebar.caption("3. CALIBRATION")
+    calib_intercept = st.sidebar.slider("Model Calibration (Intercept)", -5.0, 2.0, -1.0, help="Adjust base default probability")
+
     try:
-        res = df_raw.apply(lambda r: CreditEngine.calculate(r, params), axis=1)
+        res = df_raw.apply(lambda r: CreditEngine.calculate(r, params, calib_intercept), axis=1)
         df_final = pd.concat([df_raw, res], axis=1)
         df_final['Search_Label'] = df_final['Ticker'] + " | " + df_final['Company']
     except: return
 
-    # 3. MLOps 监控
+    # MLOps
     np.random.seed(42)
-    # 模拟训练集 (Benchmark)
-    train_scores = np.random.normal(700, 50, 1000)
-    # 计算当前 PSI
-    psi = ModelMonitor.calculate_psi(train_scores, df_final['Score'].values)
-    
+    psi = ModelMonitor.calculate_psi(np.random.normal(700,50,1000), df_final['Score'].values)
     st.sidebar.markdown("---")
-    st.sidebar.caption("3. MODEL HEALTH (MLOps)")
-    st.sidebar.metric("PSI Monitor", f"{psi:.3f}", delta="Stable" if psi<0.1 else "Drift Detected", delta_color="inverse")
-    if psi > 0.1: st.sidebar.warning("⚠️ Data Drift Alert!")
+    st.sidebar.metric("MLOps: PSI Monitor", f"{psi:.3f}", delta="Stable" if psi<0.1 else "Drift", delta_color="inverse")
 
     # ==========================================
-    # Alpha Hunter 主界面
+    # Alpha Hunter 界面
     # ==========================================
-    st.title("GLOBAL CREDIT LENS | V30.0")
-    st.caption("Mode: Distressed Alpha Hunter | Strategy: CDS Arbitrage")
+    st.title("GLOBAL CREDIT LENS | V30.2")
+    st.caption("Mode: Distressed Alpha Hunter | Modules: CDS / RWA / Swan / PSI / IV")
 
-    # 资产选择
     c_search, _ = st.columns([1, 2])
     with c_search:
         selected_label = st.selectbox("🎯 TARGET ASSET", df_final['Search_Label'].tolist())
@@ -250,34 +241,28 @@ def main():
     selected_ticker = selected_label.split(" | ")[0]
     row = df_final[df_final['Ticker'] == selected_ticker].iloc[0]
 
-    # --- 核心模块: 交易控制台 (Trading Desk) ---
+    # --- 1. 交易控制台 ---
     st.markdown("### 📡 ALPHA TRADING DESK")
-    
-    # 模拟市场数据输入 (交易员操作区)
     c1, c2, c3 = st.columns([1, 1, 2])
     with c1:
-        market_spread = st.number_input("📉 Market CDS Spread (bps)", value=300, step=10, help="当前市场上该公司的信用违约互换报价")
+        market_spread = st.number_input("📉 Market CDS Spread (bps)", value=300, step=10)
     with c2:
         recovery = st.number_input("♻️ Recovery Rate (%)", value=40, step=5) / 100.0
     
-    # 调用 Alpha 引擎生成信号
     trader = TradingEngine(recovery_rate=recovery)
     fair_spread, signal, desc, color, diff = trader.generate_signal(row['PD_Prob'], market_spread)
 
     with c3:
-        # 信号展示卡片
         st.markdown(f"""
             <div style="background-color:#111; padding:15px; border: 1px solid {color}; border-left: 10px solid {color};">
-                <h2 style="color:{color}; margin:0; font-family:'Arial Black'; letter-spacing:1px;">{signal}</h2>
+                <h2 style="color:{color}; margin:0; font-family:'Arial Black';">{signal}</h2>
                 <p style="color:#EEE; font-size:16px; margin:5px 0;">{desc}</p>
-                <p style="color:#888; font-size:12px; margin:0;">Model Fair Value: <b>{fair_spread:.0f} bps</b> vs Market: <b>{market_spread:.0f} bps</b></p>
             </div>
         """, unsafe_allow_html=True)
 
-    # --- 仪表盘可视化 ---
+    # --- 2. 仪表盘 ---
     col1, col2 = st.columns([1, 1])
     with col1:
-        # Spread Gap Gauge (套利空间)
         fig = go.Figure(go.Indicator(
             mode = "number+delta",
             value = fair_spread,
@@ -290,7 +275,6 @@ def main():
         st.plotly_chart(fig, use_container_width=True)
         
     with col2:
-        # Credit Score Gauge (风控基础)
         fig_score = go.Figure(go.Indicator(
             mode = "gauge+number", value = row['Score'],
             title = {'text': f"Credit Score (PD: {row['PD_Prob']:.1%})", 'font': {'size': 14, 'color': '#888'}},
@@ -300,53 +284,88 @@ def main():
         fig_score.update_layout(height=200, margin=dict(t=30,b=0), paper_bgcolor='rgba(0,0,0,0)', font={'color':'white'})
         st.plotly_chart(fig_score, use_container_width=True)
 
-    # --- 辅助模块 (Basel & Swan) ---
+    # --- 3. 风险分析 (瀑布图修复版) ---
     st.markdown("---")
     st.subheader("🛠️ RISK & CAPITAL ANALYTICS")
     
-    # 资本 & 黑天鹅计算
     basel = BaselEngine()
     _, _, cap_stress = basel.calculate_rwa(10_000_000, row['Rating'])
-    swan = BlackSwanEngine.simulate_survival(row, 0.4, 0.25) # 默认40%冲击
+    swan = BlackSwanEngine.simulate_survival(row, 0.4, 0.25)
     
     bc1, bc2 = st.columns(2)
     with bc1:
-        st.metric("Basel III Capital Charge", f"${cap_stress:,.0f}", "Stressed RWA Impact", delta_color="inverse")
-    with bc2:
-        st.metric("Black Swan Survival", "SURVIVED" if swan['Is_Survive'] else "BANKRUPT", f"Profit Impact: {swan['Impact']:.1f}", delta_color="normal" if swan['Is_Survive'] else "inverse")
+        # [修复] 资本瀑布图 (白色字体)
+        fig_cap = go.Figure(go.Waterfall(
+            name = "Capital", orientation = "v",
+            measure = ["relative", "total"],
+            x = ["Base RWA", "Stressed RWA"],
+            textposition = "auto",
+            text = [f"${cap_stress/1000:.0f}k", f"${cap_stress/1000:.0f}k"],
+            textfont = dict(color="white", size=14, family="Arial Black"),
+            y = [0, cap_stress], # 简化展示
+            connector = {"line":{"color":"#666"}},
+            decreasing = {"marker":{"color":"#FF4B4B"}}, totals = {"marker":{"color":"#EEE"}}
+        ))
+        fig_cap.update_layout(title="Basel III Capital Impact", template="plotly_dark", height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_cap, use_container_width=True)
 
-    # 导出 Alpha 策略报告
-    if st.button("📄 Generate Alpha Strategy Memo"):
-        try:
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", "B", 16)
-            pdf.cell(0, 10, f"ALPHA STRATEGY MEMO: {row['Ticker']}", 0, 1)
-            pdf.line(10, 20, 200, 20)
-            pdf.ln(5)
-            
-            pdf.set_font("Arial", "", 12)
-            pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
-            pdf.cell(0, 10, f"Target: {row['Company']}", 0, 1)
-            
-            pdf.set_font("Arial", "B", 14)
-            pdf.ln(5)
-            pdf.cell(0, 10, "TRADING SIGNAL", 0, 1)
-            pdf.set_font("Arial", "", 12)
-            pdf.cell(0, 10, f"Signal: {signal}", 0, 1)
-            pdf.cell(0, 10, f"Recommendation: {desc}", 0, 1)
-            
-            pdf.set_font("Arial", "B", 14)
-            pdf.ln(5)
-            pdf.cell(0, 10, "PRICING FUNDAMENTALS", 0, 1)
-            pdf.set_font("Arial", "", 12)
-            pdf.cell(0, 10, f"Model PD: {row['PD_Prob']:.2%}", 0, 1)
-            pdf.cell(0, 10, f"Fair Spread (Model): {fair_spread:.0f} bps", 0, 1)
-            pdf.cell(0, 10, f"Market Spread: {market_spread:.0f} bps", 0, 1)
-            pdf.cell(0, 10, f"Arbitrage Gap: {diff:.0f} bps", 0, 1)
-            
-            st.download_button("📥 Download PDF", bytes(pdf.output()), f"Alpha_Memo_{row['Ticker']}.pdf")
-        except: st.error("PDF Generation Error")
+    with bc2:
+        # [修复] 黑天鹅瀑布图 (白色字体)
+        is_alive = swan['Is_Survive']
+        fig_swan = go.Figure(go.Waterfall(
+            name = "Survival", orientation = "v",
+            measure = ["relative", "relative", "total"],
+            x = ["Base Profit", "Shock", "Final"],
+            textposition = "auto",
+            text = [f"{swan['Base_Profit']:.1f}", f"{swan['Impact']:.1f}", f"{swan['Final_Profit']:.1f}"],
+            textfont = dict(color="white", size=14, family="Arial Black"),
+            y = [swan['Base_Profit'], swan['Impact'], swan['Final_Profit']],
+            connector = {"line":{"color":"#666"}},
+            increasing = {"marker":{"color":"#28A745"}}, decreasing = {"marker":{"color":"#FF3333"}}, totals = {"marker":{"color": "#FFF" if is_alive else "#555"}}
+        ))
+        fig_swan.update_layout(title="Black Swan Survival Test", template="plotly_dark", height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_swan, use_container_width=True)
+
+    # --- 4. 量化看板 (包含气泡图修复) ---
+    st.markdown("---")
+    st.subheader("📊 QUANTITATIVE METRICS")
+    
+    # [修复] 找回所有的 Tab
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ Risk Heatmap", "🛁 Bubble Chart", "🎻 Rating Dist", "🔗 Correlations", "🧠 IV Analysis"])
+
+    with tab1:
+        if not df_final.empty:
+            st.plotly_chart(px.treemap(df_final, path=[px.Constant("Market"), 'Rating', 'Search_Label'], values='Score', color='Score', color_continuous_scale='RdYlGn'), use_container_width=True)
+    
+    with tab2:
+        # [修复] 找回气泡图
+        if not df_final.empty:
+            st.plotly_chart(px.scatter(df_final, x="Stressed_GM", y="Score", size="Debt Ratio", color="Rating", hover_name="Company", text="Company", title="Profitability vs Risk Score (Size=Debt)"), use_container_width=True)
+
+    with tab3:
+        if not df_final.empty:
+            st.plotly_chart(px.strip(df_final, x="Rating", y="Score", color="Rating"), use_container_width=True)
+    
+    with tab4:
+        if not df_final.empty:
+            st.plotly_chart(px.imshow(df_final[['Score', 'Gross Margin', 'Overseas Ratio', 'Inventory Days', 'Debt Ratio']].corr(), text_auto=True, color_continuous_scale='RdBu_r'), use_container_width=True)
+
+    with tab5:
+        if not df_final.empty:
+            target_col = 'Is_Bad'
+            df_final['Is_Bad'] = df_final['PD_Prob'].apply(lambda x: 1 if x > 0.30 else 0)
+            iv_result = IV_Engine.calculate_iv(df_final, target_col=target_col, feature_cols=['Gross Margin', 'Debt Ratio', 'Overseas Ratio', 'Inventory Days', 'Cash Flow'])
+            st.plotly_chart(px.bar(iv_result, x='IV', y='Feature', orientation='h', color='Feature'), use_container_width=True)
+
+    # --- 5. 底部架构 ---
+    st.markdown("---")
+    with st.expander("🏗️ System Architecture (V30.2)", expanded=False):
+        st.markdown("""
+        **1. Presentation Layer:** Streamlit, High-Contrast Viz (Fixed).
+        **2. Core Computing Layer:** * **Scoring:** Logit + PDO. * **Trading:** CDS Pricing Engine. * **Survival:** Swan Engine. * **MLOps:** PSI.
+        **3. Data Layer:** Excel Feed.
+        """)
 
 if __name__ == "__main__":
     main()
+    
