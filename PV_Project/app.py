@@ -8,9 +8,9 @@ from fpdf import FPDF
 import io
 
 # ==========================================
-# 0. 系统配置 (V31.0 Integrity Edition)
+# 0. 系统配置 (V31.2 Stable Fix Edition)
 # ==========================================
-st.set_page_config(page_title="Global Credit Lens V31.0", layout="wide", page_icon="🦅")
+st.set_page_config(page_title="Global Credit Lens V31.2", layout="wide", page_icon="🦅")
 
 st.markdown("""
     <style>
@@ -109,11 +109,11 @@ class TradingEngine:
         
         if diff > threshold:
             signal = "SHORT CREDIT (BUY CDS)"
-            desc = f"⚠️ Risk Underpriced by {diff:.0f}bps"
+            desc = f"Risk Underpriced by {diff:.0f}bps"
             color = "#DC3545" 
         elif diff < -threshold:
             signal = "LONG CREDIT (SELL CDS)"
-            desc = f"💎 Value Opportunity! Mispriced by {abs(diff):.0f}bps"
+            desc = f"Value Opportunity! Mispriced by {abs(diff):.0f}bps"
             color = "#28A745" 
         else:
             signal = "HOLD"
@@ -123,15 +123,19 @@ class TradingEngine:
         return fair_spread, signal, desc, color, diff
 
 # ==========================================
-# 4. NLP 舆情引擎
+# 4. NLP 舆情引擎 (English Mock Data)
 # ==========================================
 class SentimentEngine:
     @staticmethod
     def analyze_news(ticker):
-        # 模拟数据
+        # [关键修复] 使用英文 Mock 数据，防止 PDF 生成崩溃
+        # 如果这里使用 AkShare 抓取中文，PDF 生成会报错，除非安装中文字体
         news_db = {
-            '300750': [("Reuters", "CATL partners with Ford in US", "Positive"), ("Caixin", "Battery material costs drop", "Positive")],
-            '601012': [("WSJ", "Longi modules detained by customs", "Negative"), ("Analyst", "Oversupply warning", "Negative")]
+            '300750': [("Reuters", "CATL confirms new plant deal with Ford in US", "Positive"), ("Bloomberg", "Lithium prices drop 20%, boosting margins", "Positive")],
+            '601012': [("WSJ", "LONGi solar panels detained by US Customs", "Negative"), ("Analyst", "Global oversupply warning issued", "Negative")],
+            '600438': [("Financial Times", "Tongwei expands polysilicon capacity", "Positive")],
+            '688599': [("MarketWatch", "Trina Solar faces new tariff probe", "Negative")],
+            '002459': [("Reuters", "JA Solar reports steady Q3 growth", "Positive")]
         }
         default_news = [("AI Feed", "No major sentiment shift detected", "Neutral")]
         news_list = news_db.get(ticker, default_news)
@@ -209,55 +213,67 @@ class IV_Engine:
         return pd.DataFrame(iv_list).sort_values(by='IV', ascending=False)
 
 # ==========================================
-# 6. PDF 生成器 (独立函数)
+# 6. PDF 生成器 (Fix: Chinese Mapping & UTF8)
 # ==========================================
 def generate_pdf_report(row, signal, fair_spread, market_spread, diff, cap_stress, swan, sent_score, sent_label, news_list):
+    # [关键修复] 中文映射表：解决 FPDF 无法显示中文的问题
+    # 强制将中文公司名转换为英文，确保 PDF 生成成功
+    company_map = {
+        '通威股份': 'Tongwei Co.',
+        '宁德时代': 'CATL',
+        '隆基绿能': 'LONGi Green Energy',
+        '天合光能': 'Trina Solar',
+        '晶澳科技': 'JA Solar Technology'
+    }
+    # 如果找不到映射，就用 Ticker 代替，绝不让它报错
+    company_name_en = company_map.get(row['Company'], f"Ticker {row['Ticker']}")
+
     pdf = FPDF()
     pdf.add_page()
     
     # Header
-    pdf.set_font("Arial", "B", 18)
+    pdf.set_font("Arial", "B", 16)
     pdf.cell(0, 10, f"INSTITUTIONAL MEMO: {row['Ticker']}", 0, 1)
     pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | System: Global Credit Lens V31.0", 0, 1)
+    pdf.cell(0, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')} | System: Global Credit Lens V31.2", 0, 1)
     pdf.line(10, 25, 200, 25)
     pdf.ln(5)
     
     # 1. Executive Summary
-    pdf.set_font("Arial", "B", 14)
+    pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, "1. EXECUTIVE SUMMARY", 0, 1)
-    pdf.set_font("Arial", "", 11)
-    pdf.cell(0, 8, f"Target: {row['Company']}", 0, 1)
+    pdf.set_font("Arial", "", 10)
+    # [关键] 使用映射后的英文名
+    pdf.cell(0, 8, f"Target: {company_name_en}", 0, 1) 
     pdf.cell(0, 8, f"Rating: {row['Rating']} (Score: {row['Score']})", 0, 1)
     pdf.cell(0, 8, f"Alpha Signal: {signal}", 0, 1)
     pdf.ln(5)
 
     # 2. Trading Analytics
-    pdf.set_font("Arial", "B", 14)
+    pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, "2. ALPHA TRADING DESK", 0, 1)
-    pdf.set_font("Arial", "", 11)
+    pdf.set_font("Arial", "", 10)
     pdf.cell(0, 8, f"Market CDS Spread: {market_spread:.0f} bps", 0, 1)
     pdf.cell(0, 8, f"Model Fair Value: {fair_spread:.0f} bps", 0, 1)
-    pdf.set_text_color(220, 53, 69) if diff > 50 else (pdf.set_text_color(40, 167, 69) if diff < -50 else pdf.set_text_color(0, 0, 0))
     pdf.cell(0, 8, f"Arbitrage Gap: {diff:.0f} bps", 0, 1)
-    pdf.set_text_color(0, 0, 0)
     pdf.ln(5)
 
     # 3. Sentiment Radar
-    pdf.set_font("Arial", "B", 14)
+    pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, "3. SENTIMENT RADAR (NLP)", 0, 1)
-    pdf.set_font("Arial", "", 11)
+    pdf.set_font("Arial", "", 10)
     pdf.cell(0, 8, f"Sentiment Score: {sent_score} ({sent_label})", 0, 1)
     pdf.cell(0, 8, "Latest Headlines:", 0, 1)
-    pdf.set_font("Arial", "I", 9)
+    pdf.set_font("Arial", "I", 8)
     for src, title, tag in news_list:
+        # News titles are English (from mock data)
         pdf.cell(0, 6, f"  - [{src}] {title} ({tag})", 0, 1)
     pdf.ln(5)
     
     # 4. Risk & Capital
-    pdf.set_font("Arial", "B", 14)
+    pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 10, "4. RISK & CAPITAL", 0, 1)
-    pdf.set_font("Arial", "", 11)
+    pdf.set_font("Arial", "", 10)
     pdf.cell(0, 8, f"Basel III Capital Charge: ${cap_stress:,.0f}", 0, 1)
     pdf.cell(0, 8, f"Black Swan Survival: {'YES' if swan['Is_Survive'] else 'NO'}", 0, 1)
 
@@ -305,8 +321,8 @@ def main():
     st.sidebar.metric("MLOps: PSI Monitor", f"{psi:.3f}", delta="Stable" if psi<0.1 else "Drift", delta_color="inverse")
 
     # Main UI
-    st.title("GLOBAL CREDIT LENS | V31.0")
-    st.caption("Mode: Distressed Alpha Hunter (Full Integrity)")
+    st.title("GLOBAL CREDIT LENS | V31.2")
+    st.caption("Mode: Distressed Alpha Hunter (Stable Edition)")
 
     c_search, _ = st.columns([1, 2])
     with c_search:
@@ -365,8 +381,9 @@ def main():
     
     tab1, tab2, tab3 = st.tabs(["🏛️ Basel Capital", "🏴‍☠️ Black Swan", "🛁 Competition"])
     with tab1:
-        fig_cap = go.Figure(go.Waterfall(measure=["relative", "total"], x=["Base", "Stressed"], y=[0, cap_stress], text=[f"${cap_stress/1000:.0f}k", f"${cap_stress/1000:.0f}k"], textfont=dict(color="white"), connector={"line":{"color":"#666"}}, decreasing={"marker":{"color":"#FF4B4B"}}, totals={"marker":{"color":"#EEE"}}))
-        fig_cap.update_layout(title="Capital Impact (Restore)", template="plotly_dark", height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        # [修复] 找回三步瀑布图
+        fig_cap = go.Figure(go.Waterfall(measure=["relative", "relative", "total"], x=["Base", "Impact", "Final"], y=[0, cap_stress, cap_stress], text=[f"${cap_stress/1000:.0f}k", f"+${0:.0f}k", f"${cap_stress/1000:.0f}k"], textfont=dict(color="white"), connector={"line":{"color":"#666"}}, decreasing={"marker":{"color":"#FF4B4B"}}, totals={"marker":{"color":"#EEE"}}))
+        fig_cap.update_layout(title="Capital Impact", template="plotly_dark", height=250, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_cap, use_container_width=True)
     with tab2:
         is_alive = swan['Is_Survive']
@@ -380,7 +397,7 @@ def main():
     # --- Footer & PDF Download ---
     st.markdown("---")
     
-    # 修复：直接使用 st.download_button，不再嵌套在 if st.button 中
+    # PDF 生成与下载
     pdf_bytes = generate_pdf_report(row, signal, fair_spread, market_spread, diff, cap_stress, swan, sent_score, sent_label, news_list)
     
     st.download_button(
@@ -391,7 +408,7 @@ def main():
         help="Generate comprehensive PDF report with Risk, Capital, and Trading signals."
     )
     
-    with st.expander("🏗️ System Architecture (V31.0)"):
+    with st.expander("🏗️ System Architecture (V31.2)"):
         st.markdown("**Core:** Logit+PDO / CDS Pricing / Swan Engine / NLP Sentiment / MLOps PSI")
 
 if __name__ == "__main__":
